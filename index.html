@@ -470,11 +470,12 @@
               <button class="button small" id="compactPreset" type="button">套用参考图样式</button>
             </div>
             <div class="range-field">
-              <label for="laneWidth">单泳道宽度<input id="laneWidth" type="range" min="36" max="130" value="38"></label>
-              <span class="range-value" id="laneWidthValue">38 px</span>
+              <label for="laneWidth">单泳道宽度<input id="laneWidth" type="range" min="28" max="130" value="40"></label>
+              <span class="range-value" id="laneWidthValue">40 px</span>
             </div>
+            <p class="field-help">图中文字默认使用 Arial；紧凑样式保持泳道宽度与条带高度 1:1，条带高 1 cm 时，3 个泳道即宽 3 cm。</p>
             <div class="range-field">
-              <label for="rowHeight">条带行高<input id="rowHeight" type="range" min="28" max="100" value="40"></label>
+              <label for="rowHeight">条带行高<input id="rowHeight" type="range" min="28" max="130" value="40"></label>
               <span class="range-value" id="rowHeightValue">40 px</span>
             </div>
             <div class="range-field">
@@ -568,7 +569,7 @@
         rows: [],
         layoutMode: "compact",
         footerLabel: "Cell line",
-        laneWidth: 38,
+        laneWidth: 40,
         rowHeight: 40,
         rowGap: 7,
         labelSize: 16,
@@ -816,7 +817,7 @@
         state.laneLabels = defaultLaneLabels(state.groups);
         state.layoutMode = "compact";
         state.footerLabel = "Cell line";
-        state.laneWidth = 38;
+        state.laneWidth = 40;
         state.rowHeight = 40;
         state.rowGap = 7;
         state.labelSize = 16;
@@ -987,17 +988,22 @@
         const longestMw = Math.max(0, ...state.rows.map((row) => measuredWidth(row.mw, mwSize, compact ? 700 : 500)));
         const left = Math.min(compact ? 240 : 360, Math.max(compact ? 105 : 166, Math.ceil(longestName + (compact ? 28 : 34))));
         const right = state.showMw ? Math.min(compact ? 190 : 220, Math.max(compact ? 83 : 116, Math.ceil(longestMw + (compact ? 30 : 34)))) : 24;
-        const bandWidth = Math.max(compact ? 114 : 718, totalSamples() * state.laneWidth);
-        const width = left + bandWidth + right;
         const longestLaneLabel = Math.max(0, ...resolvedLaneLabels().map((label) => measuredWidth(label, state.labelSize)));
-        const top = compact ? Math.max(72, Math.min(170, Math.ceil(longestLaneLabel * .72 + 38))) : 82;
+        const bandWidth = compact ? totalSamples() * state.laneWidth : Math.max(718, totalSamples() * state.laneWidth);
+        const width = left + bandWidth + right;
+        const labelAngle = compact ? Math.max(
+          Math.PI / 4,
+          Math.acos(Math.min(1, Math.max(1, state.laneWidth - 4) / Math.max(1, longestLaneLabel))),
+          Math.asin(Math.min(1, (state.labelSize + 4) / state.laneWidth))
+        ) : 0;
+        const top = compact ? Math.max(72, Math.ceil(longestLaneLabel * Math.sin(labelAngle) + state.labelSize + 18)) : 82;
         const rowCount = Math.max(1, state.rows.length);
         const contentBottom = top + rowCount * state.rowHeight + Math.max(0, rowCount - 1) * state.rowGap;
         const footerLineY = contentBottom + 14;
         const footerLabelY = footerLineY + 23;
         const bottom = compact && state.footerLabel.trim() ? 86 : (state.showLanes ? 55 : 28);
         const height = contentBottom + bottom;
-        return { width, height, left, right, top, bottom, bandWidth, contentBottom, footerLineY, footerLabelY };
+        return { width, height, left, right, top, bottom, bandWidth, contentBottom, footerLineY, footerLabelY, labelAngle };
       }
 
       function drawContainedImage(ctx, row, x, y, width, height) {
@@ -1034,13 +1040,12 @@
         ctx.fillStyle = "#111827";
         if (compact) {
           resolvedLaneLabels().forEach((value, lane) => {
-            const label = fittedLabel(value, Math.max(54, state.laneWidth * 1.45), state.labelSize);
             ctx.save();
             ctx.translate(g.left + lane * laneWidth + Math.min(6, laneWidth * .15), g.top - 8);
-            ctx.rotate(-Math.PI / 4);
+            ctx.rotate(-g.labelAngle);
             ctx.textAlign = "left";
-            ctx.font = `700 ${label.size}px Arial, "Microsoft YaHei", sans-serif`;
-            ctx.fillText(label.text, 0, 0);
+            ctx.font = `700 ${state.labelSize}px Arial, "Microsoft YaHei", sans-serif`;
+            ctx.fillText(value, 0, 0);
             ctx.restore();
           });
         } else {
@@ -1206,10 +1211,9 @@
         const compact = state.layoutMode === "compact";
         if (compact) {
           resolvedLaneLabels().forEach((value, lane) => {
-            const label = fittedLabel(value, Math.max(54, state.laneWidth * 1.45), state.labelSize);
             const x = g.left + lane * laneWidth + Math.min(6, laneWidth * .15);
             const y = g.top - 8;
-            parts.push(`<text transform="translate(${x} ${y}) rotate(-45)" text-anchor="start" dominant-baseline="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${label.size}" font-weight="700" fill="#111827">${xml(label.text)}</text>`);
+            parts.push(`<text transform="translate(${x} ${y}) rotate(${-g.labelAngle * 180 / Math.PI})" text-anchor="start" dominant-baseline="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${state.labelSize}" font-weight="700" fill="#111827">${xml(value)}</text>`);
           });
         } else {
           let laneOffset = 0;
@@ -1495,7 +1499,13 @@
       ["dragleave", "drop"].forEach((type) => $("#dropzone").addEventListener(type, (event) => { event.preventDefault(); $("#dropzone").classList.remove("is-over"); }));
       $("#dropzone").addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
 
-      $("#layoutMode").addEventListener("change", (event) => { state.layoutMode = event.target.value; syncLaneToggleAvailability(); markDirty(); requestRender(); });
+      $("#layoutMode").addEventListener("change", (event) => {
+        state.layoutMode = event.target.value;
+        if (state.layoutMode === "compact") state.laneWidth = state.rowHeight;
+        syncLayoutControls();
+        markDirty();
+        requestRender();
+      });
       $("#footerLabel").addEventListener("input", (event) => { state.footerLabel = event.target.value; syncLaneToggleAvailability(); markDirty(); requestRender(); });
       $("#compactPreset").addEventListener("click", () => {
         const laneLabelText = $("#laneLabelInput").value;
@@ -1507,7 +1517,7 @@
         }
         state.layoutMode = "compact";
         state.footerLabel = $("#footerLabel").value.trim() || "Cell line";
-        state.laneWidth = 38;
+        state.laneWidth = 40;
         state.rowHeight = 40;
         state.rowGap = 7;
         state.labelSize = 16;
@@ -1525,8 +1535,15 @@
 
       [["laneWidth", "laneWidthValue", "laneWidth"], ["rowHeight", "rowHeightValue", "rowHeight"], ["rowGap", "rowGapValue", "rowGap"], ["labelSize", "labelSizeValue", "labelSize"]].forEach(([inputId, valueId, key]) => {
         $("#" + inputId).addEventListener("input", (event) => {
-          state[key] = Number(event.target.value);
+          const value = Number(event.target.value);
+          state[key] = value;
           $("#" + valueId).textContent = `${event.target.value} px`;
+          if (state.layoutMode === "compact" && (key === "laneWidth" || key === "rowHeight")) {
+            const linkedInput = key === "laneWidth" ? "rowHeight" : "laneWidth";
+            state[linkedInput] = value;
+            $("#" + linkedInput).value = value;
+            $("#" + linkedInput + "Value").textContent = `${value} px`;
+          }
           markDirty();
           requestRender();
         });
