@@ -39,6 +39,7 @@
     a { color: inherit; text-decoration: none; }
     button { color: inherit; }
     :focus-visible { outline: 3px solid rgba(40, 100, 232, .35); outline-offset: 3px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
     .topbar {
       position: sticky;
@@ -272,8 +273,13 @@
     #figureCanvas { display: block; width: auto; max-width: none; height: auto; }
     .figure-paper.is-wide { width: 100%; }
     #figureCanvas.is-wide { width: 100%; max-width: 100%; }
-    .export-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 16px 18px; border-top: 1px solid var(--line); }
+    .export-bar { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 18px; border-top: 1px solid var(--line); }
+    .export-stack { display: grid; gap: 9px; min-width: 0; }
     .export-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .export-setting { display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: #fff; font-size: 12px; font-weight: 800; }
+    .export-setting select { width: auto; min-height: 28px; padding: 0 25px 0 7px; border: 0; color: var(--ink); background: #fff; font-size: 12px; font-weight: 850; }
+    .project-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+    .autosave-status { color: var(--muted); font-size: 11px; }
     .export-note { max-width: 310px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; text-align: right; }
 
     .features { padding: 92px clamp(18px, 5vw, 74px); }
@@ -308,6 +314,8 @@
     .editor-controls { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #f8faff; }
     .editor-controls h3 { margin-bottom: 16px; font-size: 14px; }
     .editor-controls .range-field { grid-template-columns: 1fr 42px; }
+    .editor-copy { margin-top: 16px; padding-top: 15px; border-top: 1px solid var(--line); }
+    .editor-copy select { margin-bottom: 8px; font-size: 12px; }
     .dialog-foot { border-top: 1px solid var(--line); }
     .dialog-foot p { max-width: 520px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
     .dialog-actions { display: flex; gap: 8px; }
@@ -350,6 +358,7 @@
       .control-block:last-child { border-bottom: 0; }
       .canvas-stage { min-height: 390px; }
       .export-bar { align-items: flex-start; flex-direction: column; }
+      .export-stack { width: 100%; }
       .export-note { text-align: left; }
       .dialog-body { grid-template-columns: 1fr; }
       .editor-controls { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 16px; }
@@ -361,10 +370,11 @@
       .hero-metrics { grid-template-columns: 1fr; }
       .studio-section { padding-inline: 8px; }
       .controls, .preview-panel { border-radius: 14px; }
-      .export-actions { display: grid; width: 100%; grid-template-columns: 1fr 1fr; }
-      .export-actions .button:last-child { grid-column: 1 / -1; }
+      .export-actions, .project-actions { display: grid; width: 100%; grid-template-columns: 1fr 1fr; }
+      .export-setting, .autosave-status { grid-column: 1 / -1; }
       .dialog-actions { width: 100%; }
       .dialog-actions .button { flex: 1; }
+      .editor-controls { display: block; }
     }
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
@@ -473,7 +483,7 @@
               <label for="laneWidth">单泳道宽度<input id="laneWidth" type="range" min="28" max="130" value="40"></label>
               <span class="range-value" id="laneWidthValue">40 px</span>
             </div>
-            <p class="field-help">图中文字默认使用 Arial；紧凑样式保持泳道宽度与条带高度 1:1，条带高 1 cm 时，3 个泳道即宽 3 cm。</p>
+            <p class="field-help">图中文字默认使用 Arial；泳道宽度与条带高度始终保持 1:1，条带高 1 cm 时，3 个泳道即宽 3 cm。</p>
             <div class="range-field">
               <label for="rowHeight">条带行高<input id="rowHeight" type="range" min="28" max="130" value="40"></label>
               <span class="range-value" id="rowHeightValue">40 px</span>
@@ -500,15 +510,27 @@
             <span class="status" id="previewStatus">已在本地渲染</span>
           </div>
           <div class="canvas-stage">
-            <div class="figure-paper"><canvas id="figureCanvas"></canvas></div>
+            <div class="figure-paper"><canvas id="figureCanvas" role="img" aria-label="Western blot 组图预览"></canvas></div>
           </div>
           <div class="export-bar">
-            <div class="export-actions">
-              <button class="button small primary" id="exportPng" type="button">导出高清 PNG</button>
-              <button class="button small" id="exportSvg" type="button">导出可编辑 SVG</button>
-              <button class="button small" id="copyPng" type="button">复制图片</button>
+            <div class="export-stack">
+              <div class="export-actions">
+                <label class="export-setting" for="pngDpi">PNG 分辨率
+                  <select id="pngDpi"><option value="300" selected>300 DPI</option><option value="600">600 DPI</option></select>
+                </label>
+                <button class="button small primary" id="exportPng" type="button">导出 PNG</button>
+                <button class="button small" id="exportSvg" type="button">导出厘米 SVG</button>
+                <button class="button small" id="copyPng" type="button">复制图片</button>
+              </div>
+              <div class="project-actions">
+                <input id="projectFile" type="file" accept=".wb-project,application/json" hidden>
+                <button class="button small" id="saveProject" type="button">保存项目</button>
+                <button class="button small" id="openProject" type="button">打开项目</button>
+                <button class="button small" id="exportAudit" type="button">导出处理记录 CSV</button>
+                <span class="autosave-status" id="autosaveStatus" aria-live="polite">自动保存：正在准备</span>
+              </div>
             </div>
-            <p class="export-note">导出只生成新的组图，不会覆盖或修改你的原始图片。</p>
+            <p class="export-note">条带高度按 1 cm 导出；紧凑样式每个泳道宽 1 cm。项目、图片和记录均只在本地处理。</p>
           </div>
         </section>
       </div>
@@ -529,24 +551,29 @@
 
   <footer><div><strong>BlotBoard</strong> · 本地 WB 科研组图工具</div><div>浏览器原生运行 · 无需上传 · 无需安装</div></footer>
 
-  <dialog id="imageEditor">
+  <dialog id="imageEditor" aria-labelledby="editorTitle" aria-describedby="editorHelp">
     <div class="dialog-head">
-      <div><h2 id="editorTitle">编辑条带图</h2><p>拖动画布重新框选；在选区内部拖动可整体移动。</p></div>
+      <div><h2 id="editorTitle">编辑条带图</h2><p id="editorHelp" aria-live="polite">拖动画布重新框选；在选区内部拖动可整体移动。</p></div>
       <button class="icon-button" id="closeEditor" type="button" aria-label="关闭编辑器">✕</button>
     </div>
     <div class="dialog-body">
-      <div class="editor-stage"><canvas id="editorCanvas" width="900" height="480"></canvas></div>
+      <div class="editor-stage"><canvas id="editorCanvas" width="900" height="480" tabindex="0" role="application" aria-label="条带裁剪编辑器；方向键移动选区，方括号键缩放选区，按住 Shift 每次调整 10 像素"></canvas><p class="sr-only" id="cropStatus" aria-live="polite"></p></div>
       <div class="editor-controls">
         <h3>图像调整</h3>
         <div class="range-field"><label for="editBrightness">亮度<input id="editBrightness" type="range" min="50" max="160" value="100"></label><span class="range-value" id="editBrightnessValue">100%</span></div>
         <div class="range-field"><label for="editContrast">对比度<input id="editContrast" type="range" min="50" max="200" value="100"></label><span class="range-value" id="editContrastValue">100%</span></div>
         <div class="toggle-list"><label class="toggle"><input id="editInvert" type="checkbox"> 黑白反相</label></div>
-        <div class="inline-actions"><button class="button small" id="resetCrop" type="button">重置为整张图</button></div>
+        <div class="inline-actions"><button class="button small" id="newCrop" type="button">重新框选</button><button class="button small" id="resetCrop" type="button">重置为最大比例区域</button></div>
+        <div class="editor-copy">
+          <label class="caption" for="copyFromRow">复制另一行的裁剪与图像调整</label>
+          <select id="copyFromRow"></select>
+          <button class="button small" id="copyRowSettings" type="button">复制到当前行</button>
+        </div>
         <p class="field-help">调整只作用于导出的副本。为保持科研图像可追溯性，请避免过度增强。</p>
       </div>
     </div>
     <div class="dialog-foot">
-      <p>黄色框是最终用于组图的区域。导出时保持图像原始宽高比，不做非等比拉伸。</p>
+      <p>黄色框按泳道数锁定为 N:1，虚线标出每个泳道；原图不被覆盖，所有调整可写入处理记录。</p>
       <div class="dialog-actions"><button class="button small" id="cancelEditor" type="button">取消</button><button class="button small primary" id="applyEditor" type="button">应用调整</button></div>
     </div>
   </dialog>
@@ -563,7 +590,16 @@
       const MAX_FILE_BYTES = 25 * 1024 * 1024;
       const MAX_TOTAL_BYTES = 120 * 1024 * 1024;
       const MAX_PIXELS = 50_000_000;
+      const MAX_PROJECT_FILE_BYTES = 162 * 1024 * 1024;
+      const PROJECT_KIND = "blotboard-project";
+      const PROJECT_VERSION = 1;
+      const PROJECT_DB = "blotboard-wb";
+      const PROJECT_STORE = "projects";
+      const AUTOSAVE_KEY = "current";
+      const newProjectId = () => typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const state = {
+        projectId: newProjectId(),
+        modifiedAt: new Date().toISOString(),
         groups: [{ name: "Control", count: 1 }, { name: "Group 1", count: 1 }, { name: "Group 2", count: 1 }],
         laneLabels: ["Control", "Group 1", "Group 2"],
         rows: [],
@@ -576,6 +612,7 @@
         showMw: true,
         showLanes: false,
         showBorder: true,
+        pngDpi: 300,
         editor: null,
         renderQueued: false,
         demoLoaded: false,
@@ -585,6 +622,12 @@
       let toastTimer;
       let editorView;
       let pointerAction;
+      let autosaveTimer;
+      let autosaveRevision = 0;
+      let autosavePaused = false;
+      let autosaveToken = null;
+      let projectDbPromise;
+      let pendingMutations = 0;
 
       const figureCanvas = $("#figureCanvas");
       const heroCanvas = $("#heroCanvas");
@@ -593,8 +636,25 @@
       const measureCanvas = document.createElement("canvas");
       const measureContext = measureCanvas.getContext("2d");
 
-      function markDirty() {
+      function markDirty(touchModified = true) {
         state.dirty = true;
+        if (touchModified) state.modifiedAt = new Date().toISOString();
+        autosaveRevision += 1;
+        if (!autosavePaused) scheduleAutosave();
+      }
+
+      function beginImageMutation() {
+        pendingMutations += 1;
+        $(".workspace").inert = true;
+        $(".workspace").setAttribute("aria-busy", "true");
+      }
+
+      function endImageMutation() {
+        pendingMutations = Math.max(0, pendingMutations - 1);
+        if (!pendingMutations) {
+          $(".workspace").inert = false;
+          $(".workspace").removeAttribute("aria-busy");
+        }
       }
 
       function measuredWidth(text, size, weight = 700) {
@@ -620,6 +680,49 @@
 
       function totalSamples() {
         return state.groups.reduce((sum, group) => sum + group.count, 0);
+      }
+
+      function clampCrop(row, crop) {
+        const width = row.image.naturalWidth;
+        const height = row.image.naturalHeight;
+        const value = crop && [crop.x, crop.y, crop.w, crop.h].every(Number.isFinite) && crop.w > 0 && crop.h > 0
+          ? crop
+          : { x: 0, y: 0, w: width, h: height };
+        const x = Math.max(0, Math.min(width, value.x));
+        const y = Math.max(0, Math.min(height, value.y));
+        const w = Math.max(0, Math.min(width - x, value.w));
+        const h = Math.max(0, Math.min(height - y, value.h));
+        return w > 0 && h > 0 ? { x, y, w, h } : { x: 0, y: 0, w: width, h: height };
+      }
+
+      function fitAspectCrop(row, crop) {
+        const bounded = clampCrop(row, crop);
+        const ratio = Math.max(1, totalSamples());
+        const centerX = bounded.x + bounded.w / 2;
+        const centerY = bounded.y + bounded.h / 2;
+        let width = bounded.w;
+        let height = bounded.h;
+        if (width / height > ratio) width = height * ratio;
+        else height = width / ratio;
+        const x = Math.max(0, Math.min(row.image.naturalWidth - width, centerX - width / 2));
+        const y = Math.max(0, Math.min(row.image.naturalHeight - height, centerY - height / 2));
+        return { x, y, w: width, h: height };
+      }
+
+      function maximumAspectCrop(row) {
+        return fitAspectCrop(row, { x: 0, y: 0, w: row.image.naturalWidth, h: row.image.naturalHeight });
+      }
+
+      function aspectCropFromAnchor(row, anchor, point, sx, sy) {
+        const ratio = Math.max(1, totalSamples());
+        const maxWidth = sx > 0 ? row.image.naturalWidth - anchor.x : anchor.x;
+        const maxHeight = sy > 0 ? row.image.naturalHeight - anchor.y : anchor.y;
+        const limitHeight = Math.min(maxHeight, maxWidth / ratio);
+        if (limitHeight <= 0) return null;
+        const wantedHeight = Math.max(0, sy * (point.y - anchor.y), sx * (point.x - anchor.x) / ratio);
+        const height = Math.min(limitHeight, Math.max(Math.min(2, limitHeight), wantedHeight));
+        const width = height * ratio;
+        return { x: sx > 0 ? anchor.x : anchor.x - width, y: sy > 0 ? anchor.y : anchor.y - height, w: width, h: height };
       }
 
       function defaultLaneLabels(groups) {
@@ -653,6 +756,7 @@
         $("#showMw").checked = state.showMw;
         $("#showLanes").checked = state.showLanes;
         $("#showBorder").checked = state.showBorder;
+        $("#pngDpi").value = String(state.pngDpi);
         syncLaneToggleAvailability();
       }
 
@@ -734,13 +838,23 @@
         return state.rows.reduce((sum, row) => sum + (row.id === excludingId ? 0 : row.bytes || 0), 0);
       }
 
-      async function rowFromFile(file, replacingId) {
+      async function sha256Blob(blob) {
+        if (!window.crypto?.subtle) return "";
+        try {
+          const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+          return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+        } catch {
+          return "";
+        }
+      }
+
+      async function rowFromFile(file, replacingId, skipTotalLimit = false) {
         const isTiff = /\.tiff?$/i.test(file.name) || file.type === "image/tiff";
         if (!/\.(png|jpe?g|webp|bmp|tiff?)$/i.test(file.name) && !/^image\/(png|jpeg|webp|bmp|tiff)$/i.test(file.type)) {
           throw new Error(`${file.name}：暂不支持该格式，请先转为 PNG 或 JPG`);
         }
         if (file.size > MAX_FILE_BYTES) throw new Error(`${file.name}：单张图片不能超过 25 MB`);
-        if (usedUploadBytes(replacingId) + file.size > MAX_TOTAL_BYTES) throw new Error("当前项目图片总量不能超过 120 MB");
+        if (!skipTotalLimit && usedUploadBytes(replacingId) + file.size > MAX_TOTAL_BYTES) throw new Error("当前项目图片总量不能超过 120 MB");
         let src;
         let image;
         try {
@@ -754,23 +868,31 @@
           if (src) URL.revokeObjectURL(src);
           throw error;
         }
-        return {
+        const row = {
           id: ++idCounter,
           name: file.name.replace(/\.[^.]+$/, "") || `Protein ${idCounter}`,
           mw: "",
+          sourceFile: file,
+          sourceName: file.name,
+          sourceType: file.type || (isTiff ? "image/tiff" : "application/octet-stream"),
+          sourceBytes: file.size,
+          sourceLastModified: file.lastModified || 0,
+          sourceSha256: await sha256Blob(file),
           src,
           image,
-          crop: { x: 0, y: 0, w: image.naturalWidth, h: image.naturalHeight },
+          crop: null,
           brightness: 100,
           contrast: 100,
           invert: false,
           bytes: file.size,
           objectUrl: src
         };
+        row.crop = maximumAspectCrop(row);
+        return row;
       }
 
       function blankRow() {
-        return { id: ++idCounter, name: `Protein ${idCounter}`, mw: "", src: "", image: null, crop: null, brightness: 100, contrast: 100, invert: false, bytes: 0, objectUrl: null };
+        return { id: ++idCounter, name: `Protein ${idCounter}`, mw: "", sourceFile: null, sourceName: "", sourceType: "", sourceBytes: 0, sourceLastModified: 0, sourceSha256: "", src: "", image: null, crop: null, brightness: 100, contrast: 100, invert: false, bytes: 0, objectUrl: null };
       }
 
       function demoStrip(intensities, seed) {
@@ -812,7 +934,15 @@
       }
 
       async function loadDemo(silent = false) {
+        if (pendingMutations) {
+          if (!silent) toast("当前图片仍在处理中，请稍后再恢复示例");
+          return;
+        }
+        beginImageMutation();
+        try {
         state.rows.forEach((row) => { if (row.objectUrl) URL.revokeObjectURL(row.objectUrl); });
+        state.projectId = newProjectId();
+        state.modifiedAt = new Date().toISOString();
         state.groups = [{ name: "Control", count: 1 }, { name: "Group 1", count: 1 }, { name: "Group 2", count: 1 }];
         state.laneLabels = defaultLaneLabels(state.groups);
         state.layoutMode = "compact";
@@ -831,7 +961,12 @@
         state.rows = await Promise.all(definitions.map(async ([name, mw, intensities, seed]) => {
           const src = demoStrip(intensities, seed);
           const image = await loadImage(src);
-          return { id: ++idCounter, name, mw, src, image, crop: { x: 0, y: 0, w: image.naturalWidth, h: image.naturalHeight }, brightness: 100, contrast: 110, invert: false, bytes: 0, objectUrl: null };
+          const sourceName = `${name.toLowerCase().replace(/\s+/g, "-")}-example.png`;
+          const sourceBlob = dataUrlToBlob(src);
+          const sourceFile = new File([sourceBlob], sourceName, { type: "image/png", lastModified: 0 });
+          const row = { id: ++idCounter, name, mw, sourceFile, sourceName, sourceType: "image/png", sourceBytes: sourceFile.size, sourceLastModified: 0, sourceSha256: await sha256Blob(sourceFile), src, image, crop: null, brightness: 100, contrast: 110, invert: false, bytes: sourceFile.size, objectUrl: null };
+          row.crop = maximumAspectCrop(row);
+          return row;
         }));
         $("#groupInput").value = groupsToText(state.groups);
         $("#laneLabelInput").value = "";
@@ -841,7 +976,13 @@
         requestRender();
         state.demoLoaded = true;
         state.dirty = false;
-        if (!silent) toast("已恢复示例数据");
+        if (!silent) {
+          markDirty();
+          toast("已恢复示例数据");
+        }
+        } finally {
+          endImageMutation();
+        }
       }
 
       function makeButton(label, className, action, title) {
@@ -932,6 +1073,8 @@
         input.accept = ".png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,image/png,image/jpeg,image/webp,image/bmp,image/tiff";
         input.addEventListener("change", async () => {
           if (!input.files[0]) return;
+          if (pendingMutations) return toast("当前图片仍在处理中，请稍后再替换");
+          beginImageMutation();
           try {
             const replacement = await rowFromFile(input.files[0], id);
             const index = state.rows.findIndex((row) => row.id === id);
@@ -949,6 +1092,7 @@
             renderRows();
             requestRender();
           } catch (error) { toast(error.message); }
+          finally { endImageMutation(); }
         });
         input.click();
       }
@@ -956,6 +1100,9 @@
       async function addFiles(files) {
         const incoming = [...files];
         if (!incoming.length) return;
+        if (pendingMutations) return toast("当前图片仍在处理中，请等待完成后再上传");
+        beginImageMutation();
+        try {
         let added = 0;
         for (const file of incoming) {
           if (state.rows.length >= MAX_ROWS) {
@@ -979,6 +1126,9 @@
           requestRender();
           toast(`已添加 ${added} 张条带图`);
         }
+        } finally {
+          endImageMutation();
+        }
       }
 
       function geometry() {
@@ -989,7 +1139,7 @@
         const left = Math.min(compact ? 240 : 360, Math.max(compact ? 105 : 166, Math.ceil(longestName + (compact ? 28 : 34))));
         const right = state.showMw ? Math.min(compact ? 190 : 220, Math.max(compact ? 83 : 116, Math.ceil(longestMw + (compact ? 30 : 34)))) : 24;
         const longestLaneLabel = Math.max(0, ...resolvedLaneLabels().map((label) => measuredWidth(label, state.labelSize)));
-        const bandWidth = compact ? totalSamples() * state.laneWidth : Math.max(718, totalSamples() * state.laneWidth);
+        const bandWidth = totalSamples() * state.rowHeight;
         const width = left + bandWidth + right;
         const labelAngle = compact ? Math.max(
           Math.PI / 4,
@@ -1010,15 +1160,16 @@
         ctx.fillStyle = "#fff";
         ctx.fillRect(x, y, width, height);
         if (!row.image || !row.crop) return false;
-        const scale = width / row.crop.w;
-        const drawHeight = row.crop.h * scale;
+        const crop = fitAspectCrop(row, row.crop);
+        const scale = width / crop.w;
+        const drawHeight = crop.h * scale;
         const drawY = y + (height - drawHeight) / 2;
         ctx.save();
         ctx.beginPath();
         ctx.rect(x, y, width, height);
         ctx.clip();
         ctx.filter = `brightness(${row.brightness}%) contrast(${row.contrast}%) invert(${row.invert ? 100 : 0}%)`;
-        ctx.drawImage(row.image, row.crop.x, row.crop.y, row.crop.w, row.crop.h, x, drawY, width, drawHeight);
+        ctx.drawImage(row.image, crop.x, crop.y, crop.w, crop.h, x, drawY, width, drawHeight);
         ctx.restore();
         return true;
       }
@@ -1028,9 +1179,10 @@
         canvas.width = Math.round(g.width * pixelScale);
         canvas.height = Math.round(g.height * pixelScale);
         const ctx = canvas.getContext("2d");
-        ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.fillStyle = "#fff";
-        ctx.fillRect(0, 0, g.width, g.height);
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
 
         const samples = Math.max(1, totalSamples());
         const laneWidth = g.bandWidth / samples;
@@ -1144,13 +1296,18 @@
           figureCanvas.style.aspectRatio = `${g.width} / ${g.height}`;
           const heroG = paintFigure(heroCanvas, 1);
           heroCanvas.style.aspectRatio = `${heroG.width} / ${heroG.height}`;
+          figureCanvas.setAttribute("aria-label", `Western blot 组图预览：${state.rows.length} 行蛋白，${totalSamples()} 个泳道`);
           $("#previewStatus").textContent = `${state.rows.length} 行 · ${totalSamples()} 个样本 · 已在本地渲染`;
         });
       }
 
-      function fileName(extension) {
-        const date = new Date().toISOString().slice(0, 10);
-        return `WB-figure-${date}.${extension}`;
+      function artifactStem() {
+        const timestamp = state.modifiedAt.replace(/\D/g, "").slice(0, 17);
+        return `WB-${state.projectId.slice(0, 8)}-${timestamp}`;
+      }
+
+      function fileName(extension, suffix = "") {
+        return `${artifactStem()}${suffix ? `-${suffix}` : ""}.${extension}`;
       }
 
       function downloadBlob(blob, name) {
@@ -1161,7 +1318,7 @@
         document.body.append(anchor);
         anchor.click();
         anchor.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
       }
 
       function ensureExportable() {
@@ -1177,15 +1334,80 @@
         return true;
       }
 
-      function exportPng() {
+      function renderScale(dpi) {
+        return dpi / 2.54 / state.rowHeight;
+      }
+
+      let pngCrcTable;
+      function pngCrc32(bytes) {
+        if (!pngCrcTable) {
+          pngCrcTable = new Uint32Array(256);
+          for (let index = 0; index < 256; index += 1) {
+            let value = index;
+            for (let bit = 0; bit < 8; bit += 1) value = (value >>> 1) ^ ((value & 1) ? 0xedb88320 : 0);
+            pngCrcTable[index] = value >>> 0;
+          }
+        }
+        let crc = 0xffffffff;
+        for (const byte of bytes) crc = pngCrcTable[(crc ^ byte) & 255] ^ (crc >>> 8);
+        return (crc ^ 0xffffffff) >>> 0;
+      }
+
+      function pngResolutionChunk(dpi) {
+        const type = new TextEncoder().encode("pHYs");
+        const data = new Uint8Array(9);
+        const ppm = Math.round(dpi / .0254);
+        const dataView = new DataView(data.buffer);
+        dataView.setUint32(0, ppm);
+        dataView.setUint32(4, ppm);
+        data[8] = 1;
+        const chunk = new Uint8Array(12 + data.length);
+        const view = new DataView(chunk.buffer);
+        view.setUint32(0, data.length);
+        chunk.set(type, 4);
+        chunk.set(data, 8);
+        view.setUint32(8 + data.length, pngCrc32(chunk.subarray(4, 8 + data.length)));
+        return chunk;
+      }
+
+      async function withPngDpi(blob, dpi) {
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+        if (bytes.length < 33 || !signature.every((value, index) => bytes[index] === value)) throw new Error("PNG 数据无效");
+        const output = [bytes.slice(0, 8)];
+        let offset = 8;
+        let inserted = false;
+        while (offset + 12 <= bytes.length) {
+          const length = new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0);
+          const end = offset + length + 12;
+          if (end > bytes.length) throw new Error("PNG 数据不完整");
+          const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+          if (type !== "pHYs") output.push(bytes.slice(offset, end));
+          if (type === "IHDR" && !inserted) {
+            output.push(pngResolutionChunk(dpi));
+            inserted = true;
+          }
+          offset = end;
+        }
+        if (!inserted || offset !== bytes.length) throw new Error("PNG 数据不完整");
+        return new Blob(output, { type: "image/png" });
+      }
+
+      async function exportPng() {
         if (!ensureExportable()) return;
-        const canvas = document.createElement("canvas");
-        paintFigure(canvas, 3);
-        canvas.toBlob((blob) => {
-          if (!blob) return toast("PNG 生成失败");
-          downloadBlob(blob, fileName("png"));
-          toast("高清 PNG 已导出");
-        }, "image/png");
+        const dpi = Number($("#pngDpi").value) === 600 ? 600 : 300;
+        state.pngDpi = dpi;
+        try {
+          const canvas = document.createElement("canvas");
+          paintFigure(canvas, renderScale(dpi));
+          const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+          if (!blob) throw new Error("浏览器无法生成这张 PNG");
+          const physicalPng = await withPngDpi(blob, dpi);
+          downloadBlob(physicalPng, fileName("png", `${dpi}dpi`));
+          toast(`${dpi} DPI PNG 已按厘米尺寸导出`);
+        } catch (error) {
+          toast(`PNG 生成失败：${error.message}`);
+        }
       }
 
       function xml(value) {
@@ -1194,9 +1416,11 @@
 
       function rowPng(row, width, height, scale = 3) {
         const canvas = document.createElement("canvas");
-        canvas.width = width * scale;
-        canvas.height = height * scale;
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
         const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.setTransform(scale, 0, 0, scale, 0, 0);
         drawContainedImage(ctx, row, 0, 0, width, height);
         return canvas.toDataURL("image/png");
@@ -1207,7 +1431,9 @@
         const g = geometry();
         const samples = Math.max(1, totalSamples());
         const laneWidth = g.bandWidth / samples;
-        const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${g.width}" height="${g.height}" viewBox="0 0 ${g.width} ${g.height}">`, `<rect width="100%" height="100%" fill="white"/>`];
+        const widthCm = g.width / state.rowHeight;
+        const heightCm = g.height / state.rowHeight;
+        const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${widthCm.toFixed(4)}cm" height="${heightCm.toFixed(4)}cm" viewBox="0 0 ${g.width} ${g.height}">`, `<rect width="100%" height="100%" fill="white"/>`];
         const compact = state.layoutMode === "compact";
         if (compact) {
           resolvedLaneLabels().forEach((value, lane) => {
@@ -1237,7 +1463,7 @@
             parts.push(`<text x="${g.left + g.bandWidth + (compact ? 24 : 17)}" y="${y + state.rowHeight / 2}" dominant-baseline="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${mwLabel.size}" font-weight="${compact ? 700 : 500}" fill="${compact ? "#111827" : "#657187"}">${xml(mwLabel.text)}</text>`);
           }
           if (row.image) {
-            parts.push(`<image href="${rowPng(row, g.bandWidth, state.rowHeight)}" x="${g.left}" y="${y}" width="${g.bandWidth}" height="${state.rowHeight}"/>`);
+            parts.push(`<image href="${rowPng(row, g.bandWidth, state.rowHeight, renderScale(600))}" x="${g.left}" y="${y}" width="${g.bandWidth}" height="${state.rowHeight}"/>`);
           } else {
             parts.push(`<rect x="${g.left}" y="${y}" width="${g.bandWidth}" height="${state.rowHeight}" fill="#f0f3f7"/>`);
           }
@@ -1252,7 +1478,7 @@
         }
         parts.push("</svg>");
         downloadBlob(new Blob([parts.join("")], { type: "image/svg+xml;charset=utf-8" }), fileName("svg"));
-        toast("可编辑 SVG 已导出");
+        toast("可编辑 SVG 已按厘米尺寸导出");
       }
 
       async function copyPng() {
@@ -1270,13 +1496,478 @@
         }
       }
 
+      function setAutosaveStatus(message) {
+        $("#autosaveStatus").textContent = `自动保存：${message}`;
+      }
+
+      function openProjectDb() {
+        if (projectDbPromise) return projectDbPromise;
+        let blocked = false;
+        const pending = new Promise((resolve, reject) => {
+          if (!window.indexedDB) return reject(new Error("浏览器未提供 IndexedDB"));
+          const request = indexedDB.open(PROJECT_DB, 1);
+          request.onupgradeneeded = () => {
+            if (!request.result.objectStoreNames.contains(PROJECT_STORE)) request.result.createObjectStore(PROJECT_STORE, { keyPath: "key" });
+          };
+          request.onsuccess = () => {
+            if (blocked) return request.result.close();
+            request.result.onversionchange = () => {
+              request.result.close();
+              projectDbPromise = null;
+            };
+            resolve(request.result);
+          };
+          request.onerror = () => reject(request.error || new Error("无法打开本地项目库"));
+          request.onblocked = () => {
+            blocked = true;
+            reject(new Error("本地项目库被其他页面占用"));
+          };
+        });
+        projectDbPromise = pending.catch((error) => {
+          projectDbPromise = null;
+          throw error;
+        });
+        return projectDbPromise;
+      }
+
+      async function putAutosave(snapshot) {
+        const db = await openProjectDb();
+        const expectedToken = autosaveToken;
+        const nextToken = typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction(PROJECT_STORE, "readwrite");
+          const store = transaction.objectStore(PROJECT_STORE);
+          const request = store.get(AUTOSAVE_KEY);
+          let failure;
+          request.onsuccess = () => {
+            const currentToken = request.result?.token || null;
+            if (currentToken !== expectedToken) {
+              failure = new Error("另一个标签页已更新本机项目，本页未覆盖它");
+              failure.code = "AUTOSAVE_CONFLICT";
+              transaction.abort();
+              return;
+            }
+            store.put({ key: AUTOSAVE_KEY, token: nextToken, snapshot });
+          };
+          request.onerror = () => { failure = request.error || new Error("读取本地项目版本失败"); };
+          transaction.oncomplete = () => resolve(nextToken);
+          transaction.onerror = () => reject(failure || transaction.error || new Error("本地保存失败"));
+          transaction.onabort = () => reject(failure || transaction.error || new Error("本地保存已中止"));
+        });
+      }
+
+      async function getAutosave() {
+        const db = await openProjectDb();
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction(PROJECT_STORE, "readonly");
+          const request = transaction.objectStore(PROJECT_STORE).get(AUTOSAVE_KEY);
+          request.onsuccess = () => resolve(request.result || null);
+          request.onerror = () => reject(request.error || new Error("读取本地项目失败"));
+        });
+      }
+
+      function projectSnapshot() {
+        return {
+          kind: PROJECT_KIND,
+          version: PROJECT_VERSION,
+          projectId: state.projectId,
+          modifiedAt: state.modifiedAt,
+          savedAt: new Date().toISOString(),
+          settings: {
+            groups: state.groups.map((group) => ({ name: group.name, count: group.count })),
+            laneLabels: [...state.laneLabels],
+            layoutMode: state.layoutMode,
+            footerLabel: state.footerLabel,
+            laneWidth: state.laneWidth,
+            rowHeight: state.rowHeight,
+            rowGap: state.rowGap,
+            labelSize: state.labelSize,
+            showMw: state.showMw,
+            showLanes: state.showLanes,
+            showBorder: state.showBorder,
+            demoLoaded: state.demoLoaded,
+            exportDpi: state.pngDpi
+          },
+          rows: state.rows.map((row) => ({
+            name: row.name,
+            mw: row.mw,
+            crop: row.crop ? { ...row.crop } : null,
+            brightness: row.brightness,
+            contrast: row.contrast,
+            invert: row.invert,
+            source: row.sourceFile ? {
+              name: row.sourceName || row.sourceFile.name,
+              type: row.sourceType || row.sourceFile.type,
+              size: row.sourceBytes ?? row.sourceFile.size,
+              lastModified: row.sourceLastModified || row.sourceFile.lastModified || 0,
+              sha256: row.sourceSha256 || "",
+              blob: row.sourceFile
+            } : null
+          }))
+        };
+      }
+
+      function scheduleAutosave() {
+        clearTimeout(autosaveTimer);
+        setAutosaveStatus("待保存");
+        autosaveTimer = setTimeout(saveAutosave, 800);
+      }
+
+      async function saveAutosave() {
+        const revision = autosaveRevision;
+        setAutosaveStatus("保存中…");
+        try {
+          autosaveToken = await putAutosave(projectSnapshot());
+          if (revision === autosaveRevision) {
+            state.dirty = false;
+            setAutosaveStatus("已保存到本机");
+          } else {
+            scheduleAutosave();
+          }
+        } catch (error) {
+          state.dirty = true;
+          setAutosaveStatus(error.code === "AUTOSAVE_CONFLICT" ? "检测到其他标签页，未覆盖" : "不可用，请保存项目文件");
+          console.warn("BlotBoard autosave failed", error);
+        }
+      }
+
+      function blobToDataUrl(blob) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error || new Error("图片编码失败"));
+          reader.readAsDataURL(blob);
+        });
+      }
+
+      function dataUrlToBlob(dataUrl) {
+        const match = typeof dataUrl === "string" && dataUrl.match(/^data:([^;,]*)(?:;[^,]*)?;base64,([A-Za-z0-9+/=\s]+)$/);
+        if (!match) throw new Error("项目中的图片数据格式无效");
+        const binary = atob(match[2].replace(/\s/g, ""));
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+        return new Blob([bytes], { type: match[1] || "application/octet-stream" });
+      }
+
+      async function exportProject() {
+        try {
+          const snapshot = projectSnapshot();
+          const portableRows = [];
+          setAutosaveStatus("正在生成项目文件…");
+          for (const row of snapshot.rows) {
+            if (!row.source) {
+              portableRows.push(row);
+              continue;
+            }
+            const { blob, ...source } = row.source;
+            portableRows.push({ ...row, source: { ...source, dataUrl: await blobToDataUrl(blob) } });
+          }
+          const portable = { ...snapshot, rows: portableRows };
+          downloadBlob(new Blob([JSON.stringify(portable)], { type: "application/json;charset=utf-8" }), fileName("wb-project", "project"));
+          setAutosaveStatus(state.dirty ? "待保存" : "已保存到本机");
+          toast("项目文件已保存，包含原始图片和全部设置");
+        } catch (error) {
+          setAutosaveStatus("项目文件生成失败");
+          toast(`项目保存失败：${error.message}`);
+        }
+      }
+
+      function finiteInRange(value, min, max, label) {
+        if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) throw new Error(`${label}超出允许范围`);
+        return value;
+      }
+
+      function booleanValue(value, label) {
+        if (typeof value !== "boolean") throw new Error(`${label}格式无效`);
+        return value;
+      }
+
+      function validateProject(project) {
+        if (!project || project.kind !== PROJECT_KIND) throw new Error("这不是 BlotBoard 项目文件");
+        if (project.version !== PROJECT_VERSION) throw new Error(`项目版本 ${project.version ?? "未知"} 暂不支持，请使用新版网页`);
+        if (typeof project.projectId !== "string" || !/^[a-zA-Z0-9-]{8,80}$/.test(project.projectId)) throw new Error("项目标识无效");
+        if (typeof project.modifiedAt !== "string" || !Number.isFinite(Date.parse(project.modifiedAt))) throw new Error("项目修改时间无效");
+        const settings = project.settings;
+        if (!settings || !Array.isArray(settings.groups) || !settings.groups.length) throw new Error("项目缺少样本分组");
+        const groups = settings.groups.map((group) => {
+          if (!group || typeof group.name !== "string" || !group.name.trim() || group.name.length > 40) throw new Error("项目中的分组名称无效");
+          const count = finiteInRange(group.count, 1, 24, "分组样本数");
+          if (!Number.isInteger(count)) throw new Error("分组样本数必须为整数");
+          return { name: group.name, count };
+        });
+        const laneCount = groups.reduce((sum, group) => sum + group.count, 0);
+        if (laneCount > 24) throw new Error("项目总样本数超过 24");
+        if (!Array.isArray(settings.laneLabels) || settings.laneLabels.length !== laneCount || settings.laneLabels.some((label) => typeof label !== "string" || label.length > 40)) throw new Error("项目中的泳道标签无效");
+        if (!["compact", "groups"].includes(settings.layoutMode)) throw new Error("项目中的版式无效");
+        if (typeof settings.footerLabel !== "string" || settings.footerLabel.length > 40) throw new Error("项目中的底部说明无效");
+        const normalizedSettings = {
+          groups,
+          laneLabels: [...settings.laneLabels],
+          layoutMode: settings.layoutMode,
+          footerLabel: settings.footerLabel,
+          laneWidth: finiteInRange(settings.laneWidth, 28, 130, "泳道宽度"),
+          rowHeight: finiteInRange(settings.rowHeight, 28, 130, "条带行高"),
+          rowGap: finiteInRange(settings.rowGap, 0, 48, "行间距"),
+          labelSize: finiteInRange(settings.labelSize, 14, 28, "标签字号"),
+          showMw: booleanValue(settings.showMw, "分子量开关"),
+          showLanes: booleanValue(settings.showLanes, "泳道编号开关"),
+          showBorder: booleanValue(settings.showBorder, "边框开关"),
+          demoLoaded: booleanValue(settings.demoLoaded, "示例状态"),
+          exportDpi: settings.exportDpi === 600 ? 600 : 300
+        };
+        if (normalizedSettings.laneWidth !== normalizedSettings.rowHeight) throw new Error("泳道宽度与条带高度必须一致");
+        if (!Array.isArray(project.rows) || project.rows.length > MAX_ROWS) throw new Error(`项目条带行不能超过 ${MAX_ROWS} 行`);
+        const rows = project.rows.map((row) => {
+          if (!row || typeof row.name !== "string" || row.name.length > 40 || typeof row.mw !== "string" || row.mw.length > 20) throw new Error("项目中的蛋白标签无效");
+          const normalized = {
+            name: row.name,
+            mw: row.mw,
+            crop: row.crop,
+            brightness: finiteInRange(row.brightness, 50, 160, "亮度"),
+            contrast: finiteInRange(row.contrast, 50, 200, "对比度"),
+            invert: booleanValue(row.invert, "反相开关"),
+            source: row.source
+          };
+          if (row.source !== null) {
+            const source = row.source;
+            if (!source || typeof source.name !== "string" || !source.name || source.name.length > 260 || typeof source.type !== "string" || source.type.length > 100) throw new Error("项目中的原始文件信息无效");
+            finiteInRange(source.size, 0, MAX_FILE_BYTES, "原始文件大小");
+            finiteInRange(source.lastModified, 0, 8.64e15, "原始文件时间");
+            if (typeof source.sha256 !== "string" || (source.sha256 && !/^[a-f0-9]{64}$/.test(source.sha256))) throw new Error("项目中的原始文件校验值无效");
+            if (!(source.blob instanceof Blob) && typeof source.dataUrl !== "string") throw new Error("项目缺少原始图片数据");
+          } else if (row.crop !== null) {
+            throw new Error("空白条带行不能包含裁剪区域");
+          }
+          return normalized;
+        });
+        return { projectId: project.projectId, modifiedAt: new Date(project.modifiedAt).toISOString(), settings: normalizedSettings, rows };
+      }
+
+      function validatedRestoredCrop(row, crop) {
+        if (!crop || ![crop.x, crop.y, crop.w, crop.h].every((value) => typeof value === "number" && Number.isFinite(value))) throw new Error(`${row.sourceName}：裁剪参数无效`);
+        const epsilon = .001;
+        if (crop.x < 0 || crop.y < 0 || crop.w <= 0 || crop.h <= 0 || crop.x + crop.w > row.image.naturalWidth + epsilon || crop.y + crop.h > row.image.naturalHeight + epsilon) throw new Error(`${row.sourceName}：裁剪区域超出原图`);
+        return { x: crop.x, y: crop.y, w: crop.w, h: crop.h };
+      }
+
+      async function hydrateProject(project) {
+        const normalized = validateProject(project);
+        const temporaryRows = [];
+        let totalBytes = 0;
+        try {
+          for (const item of normalized.rows) {
+            if (!item.source) {
+              const row = blankRow();
+              row.name = item.name;
+              row.mw = item.mw;
+              row.brightness = item.brightness;
+              row.contrast = item.contrast;
+              row.invert = item.invert;
+              temporaryRows.push(row);
+              continue;
+            }
+            const sourceBlob = item.source.blob instanceof Blob ? item.source.blob : dataUrlToBlob(item.source.dataUrl);
+            if (sourceBlob.size !== item.source.size) throw new Error(`${item.source.name}：项目内文件大小校验失败`);
+            totalBytes += sourceBlob.size;
+            if (totalBytes > MAX_TOTAL_BYTES) throw new Error("项目原始图片总量超过 120 MB");
+            const file = new File([sourceBlob], item.source.name, { type: item.source.type || sourceBlob.type, lastModified: item.source.lastModified });
+            const row = await rowFromFile(file, undefined, true);
+            temporaryRows.push(row);
+            if (item.source.sha256 && item.source.sha256 !== row.sourceSha256) throw new Error(`${item.source.name}：无法通过 SHA-256 校验，文件可能已损坏或当前浏览器不支持校验`);
+            row.name = item.name;
+            row.mw = item.mw;
+            row.crop = validatedRestoredCrop(row, item.crop);
+            row.brightness = item.brightness;
+            row.contrast = item.contrast;
+            row.invert = item.invert;
+          }
+          return { projectId: normalized.projectId, modifiedAt: normalized.modifiedAt, settings: normalized.settings, rows: temporaryRows };
+        } catch (error) {
+          temporaryRows.forEach((row) => { if (row.objectUrl) URL.revokeObjectURL(row.objectUrl); });
+          throw error;
+        }
+      }
+
+      function applyHydratedProject(hydrated) {
+        if (imageEditor.open) imageEditor.close();
+        state.editor = null;
+        pointerAction = null;
+        const previousRows = state.rows;
+        const settings = hydrated.settings;
+        state.projectId = hydrated.projectId;
+        state.modifiedAt = hydrated.modifiedAt;
+        state.groups = settings.groups;
+        state.laneLabels = settings.laneLabels;
+        state.layoutMode = settings.layoutMode;
+        state.footerLabel = settings.footerLabel;
+        state.laneWidth = settings.laneWidth;
+        state.rowHeight = settings.rowHeight;
+        state.rowGap = settings.rowGap;
+        state.labelSize = settings.labelSize;
+        state.showMw = settings.showMw;
+        state.showLanes = settings.showLanes;
+        state.showBorder = settings.showBorder;
+        state.pngDpi = settings.exportDpi;
+        state.rows = hydrated.rows;
+        state.demoLoaded = settings.demoLoaded;
+        state.dirty = false;
+        previousRows.forEach((row) => { if (row.objectUrl) URL.revokeObjectURL(row.objectUrl); });
+        $("#groupInput").value = groupsToText(state.groups);
+        $("#laneLabelInput").value = laneLabelsToText(state.laneLabels);
+        syncLayoutControls();
+        renderGroupSummary();
+        renderRows();
+        requestRender();
+      }
+
+      function discardHydratedProject(hydrated) {
+        hydrated?.rows?.forEach((row) => { if (row.objectUrl) URL.revokeObjectURL(row.objectUrl); });
+      }
+
+      async function importProjectFile(file) {
+        if (file.size > MAX_PROJECT_FILE_BYTES) return toast("项目文件过大，不能超过约 162 MB");
+        if (pendingMutations) return toast("当前图片仍在处理中，请稍后再打开项目");
+        const workspace = $(".workspace");
+        workspace.inert = true;
+        workspace.setAttribute("aria-busy", "true");
+        const startingRevision = autosaveRevision;
+        try {
+          setAutosaveStatus("正在打开项目…");
+          const project = JSON.parse(await file.text());
+          const hydrated = await hydrateProject(project);
+          if (startingRevision !== autosaveRevision) {
+            discardHydratedProject(hydrated);
+            throw new Error("打开期间当前项目已发生变化，因此没有覆盖这些修改");
+          }
+          autosavePaused = true;
+          applyHydratedProject(hydrated);
+          autosavePaused = false;
+          markDirty(false);
+          toast("项目已打开，原始图片与全部设置已恢复");
+        } catch (error) {
+          autosavePaused = false;
+          setAutosaveStatus(state.dirty ? "待保存" : "已保存到本机");
+          toast(`项目打开失败：${error.message}`);
+        } finally {
+          workspace.inert = false;
+          workspace.removeAttribute("aria-busy");
+        }
+      }
+
+      function csvCell(value, numeric = false) {
+        let text = value === null || value === undefined ? "" : String(value);
+        if (!numeric && /^\s*[=+\-@]/.test(text)) text = `'${text}`;
+        return `"${text.replace(/"/g, '""')}"`;
+      }
+
+      async function exportAuditCsv() {
+        if (!state.rows.length) return toast("当前没有可记录的条带行");
+        const g = geometry();
+        const lanes = Math.max(1, totalSamples());
+        const timestamp = new Date().toISOString();
+        const columns = [
+          ["schema_version", true], ["project_id", false], ["project_modified_at_utc", false], ["artifact_stem", false], ["expected_png_file", false], ["expected_svg_file", false], ["exported_at_utc", false], ["row_order", true], ["protein", false], ["molecular_weight", false],
+          ["source_file", false], ["source_type", false], ["source_bytes", true], ["source_last_modified_utc", false], ["source_sha256", false], ["source_width_px", true], ["source_height_px", true],
+          ["crop_x_px", true], ["crop_y_px", true], ["crop_width_px", true], ["crop_height_px", true], ["crop_ratio", true],
+          ["brightness_percent", true], ["contrast_percent", true], ["inverted", false], ["layout_mode", false], ["lane_count", true],
+          ["groups_json", false], ["lane_labels_json", false], ["footer_label", false], ["font_family", false], ["label_size_logical_px", true], ["label_size_pt", true], ["strip_height_cm", true],
+          ["lane_width_cm", true], ["row_gap_cm", true], ["figure_width_cm", true], ["figure_height_cm", true], ["selected_png_dpi", true],
+          ["show_mw", false], ["show_lanes", false], ["show_border", false]
+        ];
+        const decimal = (value) => Number(Number(value).toFixed(6));
+        const records = await Promise.all(state.rows.map(async (row, index) => {
+          const crop = row.image && row.crop ? fitAspectCrop(row, row.crop) : null;
+          const sourceSha256 = row.sourceSha256 || (row.sourceFile ? await sha256Blob(row.sourceFile) : "");
+          return {
+            schema_version: PROJECT_VERSION,
+            project_id: state.projectId,
+            project_modified_at_utc: state.modifiedAt,
+            artifact_stem: artifactStem(),
+            expected_png_file: fileName("png", `${state.pngDpi}dpi`),
+            expected_svg_file: fileName("svg"),
+            exported_at_utc: timestamp,
+            row_order: index + 1,
+            protein: row.name,
+            molecular_weight: row.mw,
+            source_file: row.sourceName,
+            source_type: row.sourceType,
+            source_bytes: row.sourceBytes || 0,
+            source_last_modified_utc: row.sourceLastModified ? new Date(row.sourceLastModified).toISOString() : "",
+            source_sha256: sourceSha256,
+            source_width_px: row.image?.naturalWidth || "",
+            source_height_px: row.image?.naturalHeight || "",
+            crop_x_px: crop ? decimal(crop.x) : "",
+            crop_y_px: crop ? decimal(crop.y) : "",
+            crop_width_px: crop ? decimal(crop.w) : "",
+            crop_height_px: crop ? decimal(crop.h) : "",
+            crop_ratio: crop ? decimal(crop.w / crop.h) : "",
+            brightness_percent: row.brightness,
+            contrast_percent: row.contrast,
+            inverted: row.invert,
+            layout_mode: state.layoutMode,
+            lane_count: lanes,
+            groups_json: JSON.stringify(state.groups),
+            lane_labels_json: JSON.stringify(resolvedLaneLabels()),
+            footer_label: state.footerLabel,
+            font_family: "Arial",
+            label_size_logical_px: state.labelSize,
+            label_size_pt: decimal(state.labelSize / state.rowHeight * 28.3464567),
+            strip_height_cm: 1,
+            lane_width_cm: decimal(g.bandWidth / lanes / state.rowHeight),
+            row_gap_cm: decimal(state.rowGap / state.rowHeight),
+            figure_width_cm: decimal(g.width / state.rowHeight),
+            figure_height_cm: decimal(g.height / state.rowHeight),
+            selected_png_dpi: state.pngDpi,
+            show_mw: state.showMw,
+            show_lanes: state.showLanes,
+            show_border: state.showBorder
+          };
+        }));
+        const lines = [columns.map(([name]) => csvCell(name)).join(",")];
+        records.forEach((record) => lines.push(columns.map(([name, numeric]) => csvCell(record[name], numeric)).join(",")));
+        downloadBlob(new Blob(["\ufeff", lines.join("\r\n")], { type: "text/csv;charset=utf-8" }), fileName("csv", "processing-record"));
+        toast("处理记录 CSV 已导出");
+      }
+
+      async function initialize() {
+        const startingRevision = autosaveRevision;
+        try {
+          const record = await getAutosave();
+          autosaveToken = record?.token || null;
+          if (record?.snapshot) {
+            const hydrated = await hydrateProject(record.snapshot);
+            if (startingRevision !== autosaveRevision) {
+              discardHydratedProject(hydrated);
+              setAutosaveStatus("已保留当前修改");
+              return;
+            }
+            autosavePaused = true;
+            applyHydratedProject(hydrated);
+            autosavePaused = false;
+            setAutosaveStatus("已恢复本机项目");
+            return;
+          }
+          setAutosaveStatus("已开启");
+        } catch (error) {
+          autosavePaused = false;
+          setAutosaveStatus("不可用，请保存项目文件");
+          console.warn("BlotBoard restore failed", error);
+        }
+        if (startingRevision !== autosaveRevision) {
+          setAutosaveStatus("已保留当前修改");
+          return;
+        }
+        await loadDemo(true);
+      }
+
       function openEditor(id) {
         const row = state.rows.find((item) => item.id === id);
         if (!row || !row.image) return;
         state.editor = {
           rowId: id,
+          drawMode: false,
           draft: {
-            crop: { ...row.crop },
+            crop: fitAspectCrop(row, row.crop),
             brightness: row.brightness,
             contrast: row.contrast,
             invert: row.invert
@@ -1286,9 +1977,13 @@
         $("#editBrightness").value = row.brightness;
         $("#editContrast").value = row.contrast;
         $("#editInvert").checked = row.invert;
+        $("#editorHelp").textContent = `已锁定 ${totalSamples()}:1 · ${totalSamples()} 个泳道；框内拖动可移动，重新框选请点击“重新框选”。`;
+        populateCopySources();
+        syncEditorDrawMode();
         syncEditorLabels();
         imageEditor.showModal();
         renderEditor();
+        syncCropAccessibility(true);
       }
 
       function closeEditor() {
@@ -1299,6 +1994,75 @@
 
       function editorRow() {
         return state.editor && state.rows.find((row) => row.id === state.editor.rowId);
+      }
+
+      function syncCropAccessibility(announce = false) {
+        const crop = state.editor?.draft.crop;
+        if (!crop) return;
+        const values = `x ${Math.round(crop.x)}，y ${Math.round(crop.y)}，宽 ${Math.round(crop.w)}，高 ${Math.round(crop.h)} 像素`;
+        editorCanvas.setAttribute("aria-label", `条带裁剪编辑器；当前选区 ${values}。方向键移动，方括号键缩放，按住 Shift 每次调整 10 像素`);
+        if (announce) $("#cropStatus").textContent = `裁剪区域已更新：${values}`;
+      }
+
+      function syncEditorDrawMode() {
+        const active = Boolean(state.editor?.drawMode);
+        const button = $("#newCrop");
+        button.classList.toggle("primary", active);
+        button.textContent = active ? "请在原图拖动" : "重新框选";
+        editorCanvas.style.cursor = active ? "crosshair" : "grab";
+      }
+
+      function populateCopySources() {
+        const current = editorRow();
+        const select = $("#copyFromRow");
+        const button = $("#copyRowSettings");
+        select.replaceChildren();
+        if (!current) return;
+        const currentIndex = state.rows.indexOf(current);
+        const sources = state.rows.map((row, index) => ({ row, index })).filter(({ row }) => row.id !== current.id && row.image && row.crop);
+        if (!sources.length) {
+          const option = document.createElement("option");
+          option.textContent = "暂无其他已上传行";
+          option.value = "";
+          select.append(option);
+          select.disabled = true;
+          button.disabled = true;
+          return;
+        }
+        sources.forEach(({ row, index }) => {
+          const option = document.createElement("option");
+          option.value = String(row.id);
+          option.textContent = `第 ${index + 1} 行 · ${row.name || "未命名蛋白"}`;
+          select.append(option);
+        });
+        const previous = [...sources].reverse().find(({ index }) => index < currentIndex);
+        if (previous) select.value = String(previous.row.id);
+        select.disabled = false;
+        button.disabled = false;
+      }
+
+      function copyEditorSettings() {
+        const target = editorRow();
+        const source = state.rows.find((row) => row.id === Number($("#copyFromRow").value));
+        if (!target || !source || !target.image || !source.image) return;
+        const crop = fitAspectCrop(source, source.crop);
+        const mapped = {
+          x: crop.x / source.image.naturalWidth * target.image.naturalWidth,
+          y: crop.y / source.image.naturalHeight * target.image.naturalHeight,
+          w: crop.w / source.image.naturalWidth * target.image.naturalWidth,
+          h: crop.h / source.image.naturalHeight * target.image.naturalHeight
+        };
+        state.editor.draft.crop = fitAspectCrop(target, mapped);
+        state.editor.draft.brightness = source.brightness;
+        state.editor.draft.contrast = source.contrast;
+        state.editor.draft.invert = source.invert;
+        $("#editBrightness").value = source.brightness;
+        $("#editContrast").value = source.contrast;
+        $("#editInvert").checked = source.invert;
+        syncEditorLabels();
+        renderEditor();
+        syncCropAccessibility(true);
+        toast("已复制裁剪、亮度、对比度和反相设置");
       }
 
       function renderEditor() {
@@ -1336,12 +2100,27 @@
         ctx.rect(imageX, imageY, imageWidth, imageHeight);
         ctx.rect(x, y, w, h);
         ctx.fill("evenodd");
+        const laneCount = Math.max(1, totalSamples());
+        ctx.save();
+        ctx.strokeStyle = "rgba(255, 196, 0, .88)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 4]);
+        for (let lane = 1; lane < laneCount; lane += 1) {
+          const guideX = x + w * lane / laneCount;
+          ctx.beginPath();
+          ctx.moveTo(guideX, y);
+          ctx.lineTo(guideX, y + h);
+          ctx.stroke();
+        }
+        ctx.restore();
         ctx.strokeStyle = "#ffc400";
-        ctx.lineWidth = 3;
+        const cssScale = Math.max(.01, editorCanvas.getBoundingClientRect().width / width);
+        const handleSize = Math.max(10, 10 / cssScale);
+        ctx.lineWidth = Math.max(3, 2 / cssScale);
         ctx.strokeRect(x, y, w, h);
         [[x, y], [x + w, y], [x, y + h], [x + w, y + h]].forEach(([hx, hy]) => {
           ctx.fillStyle = "#ffc400";
-          ctx.fillRect(hx - 5, hy - 5, 10, 10);
+          ctx.fillRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
         });
       }
 
@@ -1367,27 +2146,12 @@
         const w = crop.w * editorView.scale;
         const h = crop.h * editorView.scale;
         const handles = { nw: [x, y], ne: [x + w, y], sw: [x, y + h], se: [x + w, y + h] };
-        return Object.entries(handles).find(([, [hx, hy]]) => Math.hypot(point.x - hx, point.y - hy) <= 13)?.[0] || "";
-      }
-
-      function isFullCrop(row, crop) {
-        return crop.x <= 1 && crop.y <= 1 && crop.x + crop.w >= row.image.naturalWidth - 1 && crop.y + crop.h >= row.image.naturalHeight - 1;
-      }
-
-      function boundedCrop(row, first, second) {
-        let x1 = Math.max(0, Math.min(row.image.naturalWidth, Math.min(first.x, second.x)));
-        let x2 = Math.max(0, Math.min(row.image.naturalWidth, Math.max(first.x, second.x)));
-        let y1 = Math.max(0, Math.min(row.image.naturalHeight, Math.min(first.y, second.y)));
-        let y2 = Math.max(0, Math.min(row.image.naturalHeight, Math.max(first.y, second.y)));
-        if (x2 - x1 < 2) {
-          if (x1 + 2 <= row.image.naturalWidth) x2 = x1 + 2;
-          else x1 = Math.max(0, x2 - 2);
-        }
-        if (y2 - y1 < 2) {
-          if (y1 + 2 <= row.image.naturalHeight) y2 = y1 + 2;
-          else y1 = Math.max(0, y2 - 2);
-        }
-        return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+        const cssScale = Math.max(.01, editorCanvas.getBoundingClientRect().width / editorView.width);
+        const hitRadius = Math.max(13, 22 / cssScale);
+        const nearest = Object.entries(handles)
+          .map(([handle, [hx, hy]]) => ({ handle, distance: Math.hypot(point.x - hx, point.y - hy) }))
+          .sort((first, second) => first.distance - second.distance)[0];
+        return nearest && nearest.distance <= hitRadius ? nearest.handle : "";
       }
 
       function oppositeCorner(handle, crop) {
@@ -1404,8 +2168,15 @@
         const point = imagePoint(canvasPosition, row);
         const crop = state.editor.draft.crop;
         const handle = cropHandleAt(canvasPosition, crop);
-        if (handle) pointerAction = { type: "resize", anchor: oppositeCorner(handle, crop) };
-        else if (pointInsideCrop(point, crop) && !isFullCrop(row, crop)) pointerAction = { type: "move", start: point, original: { ...crop } };
+        if (state.editor.drawMode || event.shiftKey) {
+          pointerAction = { type: "draw", start: point };
+          state.editor.drawMode = false;
+          syncEditorDrawMode();
+        } else if (handle) {
+          const directions = { nw: [-1, -1], ne: [1, -1], sw: [-1, 1], se: [1, 1] }[handle];
+          pointerAction = { type: "resize", anchor: oppositeCorner(handle, crop), sx: directions[0], sy: directions[1] };
+        }
+        else if (pointInsideCrop(point, crop)) pointerAction = { type: "move", start: point, original: { ...crop } };
         else pointerAction = { type: "draw", start: point };
         editorCanvas.setPointerCapture(event.pointerId);
       });
@@ -1415,9 +2186,15 @@
         const row = editorRow();
         const point = imagePoint(canvasPoint(event), row);
         if (pointerAction.type === "draw") {
-          state.editor.draft.crop = boundedCrop(row, pointerAction.start, point);
+          const dx = point.x - pointerAction.start.x;
+          const dy = point.y - pointerAction.start.y;
+          const sx = dx < 0 ? -1 : dx > 0 ? 1 : (row.image.naturalWidth - pointerAction.start.x >= pointerAction.start.x ? 1 : -1);
+          const sy = dy < 0 ? -1 : dy > 0 ? 1 : (row.image.naturalHeight - pointerAction.start.y >= pointerAction.start.y ? 1 : -1);
+          const crop = aspectCropFromAnchor(row, pointerAction.start, point, sx, sy);
+          if (crop) state.editor.draft.crop = crop;
         } else if (pointerAction.type === "resize") {
-          state.editor.draft.crop = boundedCrop(row, pointerAction.anchor, point);
+          const crop = aspectCropFromAnchor(row, pointerAction.anchor, point, pointerAction.sx, pointerAction.sy);
+          if (crop) state.editor.draft.crop = crop;
         } else {
           const original = pointerAction.original;
           const x = Math.max(0, Math.min(row.image.naturalWidth - original.w, original.x + point.x - pointerAction.start.x));
@@ -1431,9 +2208,43 @@
         if (!pointerAction) return;
         if (editorCanvas.hasPointerCapture(event.pointerId)) editorCanvas.releasePointerCapture(event.pointerId);
         pointerAction = null;
+        syncCropAccessibility(true);
       });
       editorCanvas.addEventListener("pointercancel", () => { pointerAction = null; });
       editorCanvas.addEventListener("lostpointercapture", () => { pointerAction = null; });
+      editorCanvas.addEventListener("keydown", (event) => {
+        const row = editorRow();
+        const moveKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+        const resize = event.code === "BracketLeft" || event.code === "BracketRight";
+        if (!row || (!moveKeys.includes(event.key) && !resize)) return;
+        event.preventDefault();
+        const crop = state.editor.draft.crop;
+        const step = event.shiftKey ? 10 : 1;
+        if (resize) {
+          const ratio = Math.max(1, totalSamples());
+          const maximumHeight = Math.min(row.image.naturalHeight, row.image.naturalWidth / ratio);
+          const height = Math.max(Math.min(2, maximumHeight), Math.min(maximumHeight, crop.h + (event.code === "BracketRight" ? step : -step)));
+          const width = height * ratio;
+          const centerX = crop.x + crop.w / 2;
+          const centerY = crop.y + crop.h / 2;
+          state.editor.draft.crop = {
+            x: Math.max(0, Math.min(row.image.naturalWidth - width, centerX - width / 2)),
+            y: Math.max(0, Math.min(row.image.naturalHeight - height, centerY - height / 2)),
+            w: width,
+            h: height
+          };
+        } else {
+          const deltaX = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
+          const deltaY = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
+          state.editor.draft.crop = {
+            ...crop,
+            x: Math.max(0, Math.min(row.image.naturalWidth - crop.w, crop.x + deltaX)),
+            y: Math.max(0, Math.min(row.image.naturalHeight - crop.h, crop.y + deltaY))
+          };
+        }
+        renderEditor();
+        syncCropAccessibility(true);
+      });
 
       function syncEditorLabels() {
         $("#editBrightnessValue").textContent = `${$("#editBrightness").value}%`;
@@ -1453,7 +2264,7 @@
         const row = editorRow();
         if (!row) return closeEditor();
         const draft = state.editor.draft;
-        row.crop = { ...draft.crop };
+        row.crop = fitAspectCrop(row, draft.crop);
         row.brightness = draft.brightness;
         row.contrast = draft.contrast;
         row.invert = draft.invert;
@@ -1501,7 +2312,7 @@
 
       $("#layoutMode").addEventListener("change", (event) => {
         state.layoutMode = event.target.value;
-        if (state.layoutMode === "compact") state.laneWidth = state.rowHeight;
+        state.laneWidth = state.rowHeight;
         syncLayoutControls();
         markDirty();
         requestRender();
@@ -1538,7 +2349,7 @@
           const value = Number(event.target.value);
           state[key] = value;
           $("#" + valueId).textContent = `${event.target.value} px`;
-          if (state.layoutMode === "compact" && (key === "laneWidth" || key === "rowHeight")) {
+          if (key === "laneWidth" || key === "rowHeight") {
             const linkedInput = key === "laneWidth" ? "rowHeight" : "laneWidth";
             state[linkedInput] = value;
             $("#" + linkedInput).value = value;
@@ -1554,18 +2365,37 @@
       $("#exportPng").addEventListener("click", exportPng);
       $("#exportSvg").addEventListener("click", exportSvg);
       $("#copyPng").addEventListener("click", copyPng);
+      $("#pngDpi").addEventListener("change", (event) => { state.pngDpi = Number(event.target.value) === 600 ? 600 : 300; markDirty(); });
+      $("#saveProject").addEventListener("click", exportProject);
+      $("#openProject").addEventListener("click", () => $("#projectFile").click());
+      $("#projectFile").addEventListener("change", (event) => {
+        const file = event.target.files[0];
+        event.target.value = "";
+        if (file) importProjectFile(file);
+      });
+      $("#exportAudit").addEventListener("click", exportAuditCsv);
 
       $("#closeEditor").addEventListener("click", closeEditor);
       $("#cancelEditor").addEventListener("click", closeEditor);
       $("#applyEditor").addEventListener("click", applyEditor);
+      $("#copyRowSettings").addEventListener("click", copyEditorSettings);
       $("#editBrightness").addEventListener("input", updateEditorDraft);
       $("#editContrast").addEventListener("input", updateEditorDraft);
       $("#editInvert").addEventListener("change", updateEditorDraft);
+      $("#newCrop").addEventListener("click", () => {
+        if (!state.editor) return;
+        state.editor.drawMode = !state.editor.drawMode;
+        syncEditorDrawMode();
+        if (state.editor.drawMode) editorCanvas.focus();
+      });
       $("#resetCrop").addEventListener("click", () => {
         const row = editorRow();
         if (!row) return;
-        state.editor.draft.crop = { x: 0, y: 0, w: row.image.naturalWidth, h: row.image.naturalHeight };
+        state.editor.drawMode = false;
+        syncEditorDrawMode();
+        state.editor.draft.crop = maximumAspectCrop(row);
         renderEditor();
+        syncCropAccessibility(true);
       });
       imageEditor.addEventListener("cancel", (event) => { event.preventDefault(); closeEditor(); });
       window.addEventListener("resize", () => { if (state.editor) renderEditor(); });
@@ -1575,7 +2405,12 @@
         event.returnValue = "";
       });
 
-      loadDemo(true);
+      $(".workspace").inert = true;
+      $(".workspace").setAttribute("aria-busy", "true");
+      initialize().finally(() => {
+        $(".workspace").inert = false;
+        $(".workspace").removeAttribute("aria-busy");
+      });
     })();
   </script>
 </body>
