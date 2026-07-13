@@ -33,7 +33,7 @@
         var(--bg);
       font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
     }
-    button, input, textarea { font: inherit; }
+    button, input, textarea, select { font: inherit; }
     button, a { -webkit-tap-highlight-color: transparent; }
     a { color: inherit; text-decoration: none; }
     button { color: inherit; }
@@ -192,7 +192,7 @@
     .control-title h3 { margin: 0; font-size: 16px; }
     .step { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 8px; color: var(--blue); background: var(--blue-soft); font-size: 12px; font-weight: 900; }
     label.caption { display: block; margin-bottom: 8px; color: var(--muted); font-size: 12px; font-weight: 800; }
-    textarea, input[type="text"], input[type="number"] {
+    textarea, select, input[type="text"], input[type="number"] {
       width: 100%;
       border: 1px solid #cfd9e8;
       border-radius: 10px;
@@ -200,7 +200,7 @@
       background: #fff;
     }
     textarea { min-height: 74px; padding: 11px 12px; resize: vertical; line-height: 1.5; }
-    input[type="text"], input[type="number"] { min-height: 40px; padding: 0 10px; }
+    select, input[type="text"], input[type="number"] { min-height: 40px; padding: 0 10px; }
     .field-help { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
     .group-summary { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
     .chip { padding: 7px 9px; border-radius: 999px; color: var(--blue-dark); background: var(--blue-soft); font-size: 11px; font-weight: 800; }
@@ -267,8 +267,10 @@
     .status { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
     .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #20b486; box-shadow: 0 0 0 4px rgba(32, 180, 134, .12); }
     .canvas-stage { min-height: 560px; padding: clamp(18px, 3vw, 40px); overflow: auto; background: #edf2f8; }
-    .figure-paper { min-width: 620px; padding: 18px; border-radius: 6px; background: #fff; box-shadow: 0 16px 38px rgba(43, 62, 92, .14); }
-    #figureCanvas { display: block; width: 100%; height: auto; }
+    .figure-paper { width: max-content; min-width: 0; margin: 0 auto; padding: 18px; border-radius: 6px; background: #fff; box-shadow: 0 16px 38px rgba(43, 62, 92, .14); }
+    #figureCanvas { display: block; width: auto; max-width: none; height: auto; }
+    .figure-paper.is-wide { width: 100%; }
+    #figureCanvas.is-wide { width: 100%; max-width: 100%; }
     .export-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 16px 18px; border-top: 1px solid var(--line); }
     .export-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .export-note { max-width: 310px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; text-align: right; }
@@ -430,10 +432,13 @@
           <section class="control-block">
             <div class="control-title"><h3>样本分组</h3><span class="step">1</span></div>
             <label class="caption" for="groupInput">每组名称与样本数</label>
-            <textarea id="groupInput" spellcheck="false">Control × 3, Treatment × 3</textarea>
+            <textarea id="groupInput" spellcheck="false">sh-NC × 1, sh1 × 1, sh2 × 1</textarea>
             <p class="field-help">格式示例：Control × 3, Drug × 3；最多 24 个样本。</p>
+            <label class="caption" for="laneLabelInput" style="margin-top:14px">泳道标签（可选）</label>
+            <textarea id="laneLabelInput" spellcheck="false" placeholder="例如 sh-NC, sh1, sh2"></textarea>
+            <p class="field-help">逗号分隔，数量须与总样本数一致；留空会自动生成。</p>
             <div class="inline-actions">
-              <button class="button small primary" id="applyGroups" type="button">应用分组</button>
+              <button class="button small primary" id="applyGroups" type="button">应用分组与标签</button>
               <button class="button small" id="loadDemo" type="button">恢复示例</button>
             </div>
             <div class="group-summary" id="groupSummary"></div>
@@ -441,9 +446,9 @@
 
           <section class="control-block">
             <div class="control-title"><h3>条带行</h3><span class="step">2</span></div>
-            <input id="multiFile" type="file" accept=".png,.jpg,.jpeg,.webp,.bmp,image/png,image/jpeg,image/webp,image/bmp" multiple hidden>
+            <input id="multiFile" type="file" accept=".png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,image/png,image/jpeg,image/webp,image/bmp,image/tiff" multiple hidden>
             <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="上传条带图片">
-              <div><strong>拖入或选择条带图片</strong><span>PNG / JPG / WebP / BMP，可一次多选</span></div>
+              <div><strong>拖入或选择条带图片</strong><span>PNG / JPG / WebP / BMP / 8-bit 灰度 TIFF，可一次多选</span></div>
             </div>
             <div class="row-list" id="rowList"></div>
             <div class="inline-actions">
@@ -453,22 +458,36 @@
 
           <section class="control-block">
             <div class="control-title"><h3>版式细节</h3><span class="step">3</span></div>
-            <div class="range-field">
-              <label for="rowHeight">条带行高<input id="rowHeight" type="range" min="42" max="100" value="64"></label>
-              <span class="range-value" id="rowHeightValue">64 px</span>
+            <label class="caption" for="layoutMode">顶部标注样式</label>
+            <select id="layoutMode">
+              <option value="groups">分组名称＋横线</option>
+              <option value="compact" selected>倾斜泳道标签（期刊紧凑）</option>
+            </select>
+            <label class="caption" for="footerLabel" style="margin-top:14px">底部说明 / 细胞系</label>
+            <input id="footerLabel" type="text" maxlength="40" value="HCC1954" placeholder="例如 HCC1954">
+            <div class="inline-actions">
+              <button class="button small" id="compactPreset" type="button">套用参考图样式</button>
             </div>
             <div class="range-field">
-              <label for="rowGap">行间距<input id="rowGap" type="range" min="8" max="48" value="22"></label>
-              <span class="range-value" id="rowGapValue">22 px</span>
+              <label for="laneWidth">单泳道宽度<input id="laneWidth" type="range" min="36" max="130" value="38"></label>
+              <span class="range-value" id="laneWidthValue">38 px</span>
             </div>
             <div class="range-field">
-              <label for="labelSize">标签字号<input id="labelSize" type="range" min="14" max="28" value="20"></label>
-              <span class="range-value" id="labelSizeValue">20 px</span>
+              <label for="rowHeight">条带行高<input id="rowHeight" type="range" min="28" max="100" value="40"></label>
+              <span class="range-value" id="rowHeightValue">40 px</span>
+            </div>
+            <div class="range-field">
+              <label for="rowGap">行间距<input id="rowGap" type="range" min="0" max="48" value="7"></label>
+              <span class="range-value" id="rowGapValue">7 px</span>
+            </div>
+            <div class="range-field">
+              <label for="labelSize">标签字号<input id="labelSize" type="range" min="14" max="28" value="16"></label>
+              <span class="range-value" id="labelSizeValue">16 px</span>
             </div>
             <div class="toggle-list">
               <label class="toggle"><input id="showMw" type="checkbox" checked> 显示分子量标签</label>
-              <label class="toggle"><input id="showLanes" type="checkbox"> 显示泳道编号</label>
-              <label class="toggle"><input id="showBorder" type="checkbox"> 显示条带区域边框</label>
+              <label class="toggle"><input id="showLanes" type="checkbox" disabled> 显示泳道编号</label>
+              <label class="toggle"><input id="showBorder" type="checkbox" checked> 显示条带区域边框</label>
             </div>
           </section>
         </aside>
@@ -532,6 +551,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <script src="./tiff.js"></script>
   <script>
     (() => {
       "use strict";
@@ -542,16 +562,21 @@
       const MAX_TOTAL_BYTES = 120 * 1024 * 1024;
       const MAX_PIXELS = 50_000_000;
       const state = {
-        groups: [{ name: "Control", count: 3 }, { name: "Treatment", count: 3 }],
+        groups: [{ name: "sh-NC", count: 1 }, { name: "sh1", count: 1 }, { name: "sh2", count: 1 }],
+        laneLabels: ["sh-NC", "sh1", "sh2"],
         rows: [],
-        rowHeight: 64,
-        rowGap: 22,
-        labelSize: 20,
+        layoutMode: "compact",
+        footerLabel: "HCC1954",
+        laneWidth: 38,
+        rowHeight: 40,
+        rowGap: 7,
+        labelSize: 16,
         showMw: true,
         showLanes: false,
-        showBorder: false,
+        showBorder: true,
         editor: null,
         renderQueued: false,
+        demoLoaded: false,
         dirty: false
       };
       let idCounter = 0;
@@ -595,6 +620,47 @@
         return state.groups.reduce((sum, group) => sum + group.count, 0);
       }
 
+      function defaultLaneLabels(groups) {
+        return groups.flatMap((group) => Array.from({ length: group.count }, (_, index) => group.count === 1 ? group.name : `${group.name}-${index + 1}`));
+      }
+
+      function parseLaneLabels(value, groups) {
+        const labels = value.replace(/[，；;]/g, ",").split(/[\n,]+/).map((item) => item.trim()).filter(Boolean);
+        if (!labels.length) return defaultLaneLabels(groups);
+        const expected = groups.reduce((sum, group) => sum + group.count, 0);
+        if (labels.length !== expected) throw new Error(`泳道标签需要 ${expected} 个，当前为 ${labels.length} 个`);
+        if (labels.some((label) => label.length > 40)) throw new Error("单个泳道标签最多 40 个字符");
+        return labels;
+      }
+
+      function laneLabelsToText(labels) {
+        return labels.join(", ");
+      }
+
+      function resolvedLaneLabels() {
+        return state.laneLabels.length === totalSamples() ? state.laneLabels : defaultLaneLabels(state.groups);
+      }
+
+      function syncLayoutControls() {
+        $("#layoutMode").value = state.layoutMode;
+        $("#footerLabel").value = state.footerLabel;
+        [["laneWidth", "laneWidthValue", state.laneWidth], ["rowHeight", "rowHeightValue", state.rowHeight], ["rowGap", "rowGapValue", state.rowGap], ["labelSize", "labelSizeValue", state.labelSize]].forEach(([inputId, valueId, value]) => {
+          $("#" + inputId).value = value;
+          $("#" + valueId).textContent = `${value} px`;
+        });
+        $("#showMw").checked = state.showMw;
+        $("#showLanes").checked = state.showLanes;
+        $("#showBorder").checked = state.showBorder;
+        syncLaneToggleAvailability();
+      }
+
+      function syncLaneToggleAvailability() {
+        const input = $("#showLanes");
+        const unavailable = state.layoutMode === "compact" && Boolean(state.footerLabel.trim());
+        input.disabled = unavailable;
+        input.closest(".toggle").title = unavailable ? "紧凑样式显示底部说明时不显示泳道编号" : "";
+      }
+
       function parseGroups(value) {
         const chunks = value.replace(/[，；;]/g, ",").split(/[\n,]+/).map((item) => item.trim()).filter(Boolean);
         if (!chunks.length) throw new Error("请至少输入一个分组");
@@ -635,23 +701,55 @@
         });
       }
 
+      async function decodeTiffImage(file) {
+        if (!window.WBTiff) throw new Error("TIFF 解码器未加载");
+        const decoded = window.WBTiff.decode(await file.arrayBuffer(), MAX_PIXELS);
+        const canvas = document.createElement("canvas");
+        canvas.width = decoded.width;
+        canvas.height = decoded.height;
+        const ctx = canvas.getContext("2d");
+        const imageData = ctx.createImageData(decoded.width, decoded.height);
+        for (let source = 0, target = 0; source < decoded.pixels.length; source += 1, target += 4) {
+          const value = decoded.pixels[source];
+          imageData.data[target] = value;
+          imageData.data[target + 1] = value;
+          imageData.data[target + 2] = value;
+          imageData.data[target + 3] = 255;
+        }
+        ctx.putImageData(imageData, 0, 0);
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+        if (!blob) throw new Error("TIFF 预览生成失败");
+        const src = URL.createObjectURL(blob);
+        try {
+          return { src, image: await loadImage(src) };
+        } catch (error) {
+          URL.revokeObjectURL(src);
+          throw error;
+        }
+      }
+
       function usedUploadBytes(excludingId) {
         return state.rows.reduce((sum, row) => sum + (row.id === excludingId ? 0 : row.bytes || 0), 0);
       }
 
       async function rowFromFile(file, replacingId) {
-        if (!/\.(png|jpe?g|webp|bmp)$/i.test(file.name) && !/^image\/(png|jpeg|webp|bmp)$/i.test(file.type)) {
+        const isTiff = /\.tiff?$/i.test(file.name) || file.type === "image/tiff";
+        if (!/\.(png|jpe?g|webp|bmp|tiff?)$/i.test(file.name) && !/^image\/(png|jpeg|webp|bmp|tiff)$/i.test(file.type)) {
           throw new Error(`${file.name}：暂不支持该格式，请先转为 PNG 或 JPG`);
         }
         if (file.size > MAX_FILE_BYTES) throw new Error(`${file.name}：单张图片不能超过 25 MB`);
         if (usedUploadBytes(replacingId) + file.size > MAX_TOTAL_BYTES) throw new Error("当前项目图片总量不能超过 120 MB");
-        const src = URL.createObjectURL(file);
+        let src;
         let image;
         try {
-          image = await loadImage(src);
+          if (isTiff) ({ src, image } = await decodeTiffImage(file));
+          else {
+            src = URL.createObjectURL(file);
+            image = await loadImage(src);
+          }
           if (image.naturalWidth * image.naturalHeight > MAX_PIXELS) throw new Error(`${file.name}：图片像素过大，请控制在 5000 万像素以内`);
         } catch (error) {
-          URL.revokeObjectURL(src);
+          if (src) URL.revokeObjectURL(src);
           throw error;
         }
         return {
@@ -674,8 +772,8 @@
       }
 
       function demoStrip(intensities, seed) {
-        const width = 900;
-        const height = 78;
+        const width = intensities.length * 72;
+        const height = 76;
         const canvas = document.createElement("canvas");
         canvas.width = width;
         canvas.height = height;
@@ -713,11 +811,20 @@
 
       async function loadDemo(silent = false) {
         state.rows.forEach((row) => { if (row.objectUrl) URL.revokeObjectURL(row.objectUrl); });
-        state.groups = [{ name: "Control", count: 3 }, { name: "Treatment", count: 3 }];
+        state.groups = [{ name: "sh-NC", count: 1 }, { name: "sh1", count: 1 }, { name: "sh2", count: 1 }];
+        state.laneLabels = defaultLaneLabels(state.groups);
+        state.layoutMode = "compact";
+        state.footerLabel = "HCC1954";
+        state.laneWidth = 38;
+        state.rowHeight = 40;
+        state.rowGap = 7;
+        state.labelSize = 16;
+        state.showMw = true;
+        state.showLanes = false;
+        state.showBorder = true;
         const definitions = [
-          ["p-ERK1/2", "42/44 kDa", [.24, .28, .31, .76, .83, .72], 21],
-          ["ERK1/2", "42/44 kDa", [.58, .61, .55, .62, .59, .63], 47],
-          ["β-Actin", "42 kDa", [.52, .55, .50, .54, .51, .56], 81]
+          ["HER2", "185 KD", [.88, .72, .63], 21],
+          ["GAPDH", "36 KD", [.68, .72, .70], 47]
         ];
         state.rows = await Promise.all(definitions.map(async ([name, mw, intensities, seed]) => {
           const src = demoStrip(intensities, seed);
@@ -725,9 +832,12 @@
           return { id: ++idCounter, name, mw, src, image, crop: { x: 0, y: 0, w: image.naturalWidth, h: image.naturalHeight }, brightness: 100, contrast: 110, invert: false, bytes: 0, objectUrl: null };
         }));
         $("#groupInput").value = groupsToText(state.groups);
+        $("#laneLabelInput").value = "";
+        syncLayoutControls();
         renderGroupSummary();
         renderRows();
         requestRender();
+        state.demoLoaded = true;
         state.dirty = false;
         if (!silent) toast("已恢复示例数据");
       }
@@ -766,14 +876,14 @@
           name.value = row.name;
           name.maxLength = 40;
           name.setAttribute("aria-label", `第 ${index + 1} 行蛋白名称`);
-          name.addEventListener("input", () => { row.name = name.value; markDirty(); requestRender(); });
+          name.addEventListener("input", () => { row.name = name.value; state.demoLoaded = false; markDirty(); requestRender(); });
           const mw = document.createElement("input");
           mw.type = "text";
           mw.value = row.mw;
           mw.placeholder = "kDa";
           mw.maxLength = 20;
           mw.setAttribute("aria-label", `第 ${index + 1} 行分子量`);
-          mw.addEventListener("input", () => { row.mw = mw.value; markDirty(); requestRender(); });
+          mw.addEventListener("input", () => { row.mw = mw.value; state.demoLoaded = false; markDirty(); requestRender(); });
           top.append(thumb, name, mw);
 
           const actions = document.createElement("div");
@@ -797,6 +907,7 @@
         const next = index + delta;
         if (next < 0 || next >= state.rows.length) return;
         [state.rows[index], state.rows[next]] = [state.rows[next], state.rows[index]];
+        state.demoLoaded = false;
         markDirty();
         renderRows();
         requestRender();
@@ -807,6 +918,7 @@
         if (!row || !confirm(`删除“${row.name || "未命名蛋白"}”这一行？`)) return;
         if (row.objectUrl) URL.revokeObjectURL(row.objectUrl);
         state.rows = state.rows.filter((row) => row.id !== id);
+        state.demoLoaded = false;
         markDirty();
         renderRows();
         requestRender();
@@ -815,7 +927,7 @@
       function chooseReplacement(id) {
         const input = document.createElement("input");
         input.type = "file";
-        input.accept = ".png,.jpg,.jpeg,.webp,.bmp,image/png,image/jpeg,image/webp,image/bmp";
+        input.accept = ".png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,image/png,image/jpeg,image/webp,image/bmp,image/tiff";
         input.addEventListener("change", async () => {
           if (!input.files[0]) return;
           try {
@@ -830,6 +942,7 @@
             replacement.name = state.rows[index].name || replacement.name;
             replacement.mw = state.rows[index].mw;
             state.rows[index] = replacement;
+            state.demoLoaded = false;
             markDirty();
             renderRows();
             requestRender();
@@ -848,7 +961,13 @@
             break;
           }
           try {
-            state.rows.push(await rowFromFile(file));
+            const row = await rowFromFile(file);
+            if (state.demoLoaded) {
+              state.rows.forEach((item) => { if (item.objectUrl) URL.revokeObjectURL(item.objectUrl); });
+              state.rows = [];
+              state.demoLoaded = false;
+            }
+            state.rows.push(row);
             added += 1;
           } catch (error) { toast(error.message); }
         }
@@ -861,17 +980,23 @@
       }
 
       function geometry() {
+        const compact = state.layoutMode === "compact";
         const longestName = Math.max(0, ...state.rows.map((row) => measuredWidth(row.name, state.labelSize)));
-        const longestMw = Math.max(0, ...state.rows.map((row) => measuredWidth(row.mw, Math.max(12, state.labelSize - 3), 500)));
-        const left = Math.min(360, Math.max(166, Math.ceil(longestName + 34)));
-        const right = state.showMw ? Math.min(190, Math.max(116, Math.ceil(longestMw + 34))) : 46;
-        const bandWidth = Math.max(718, totalSamples() * 36);
+        const mwSize = compact ? state.labelSize : Math.max(12, state.labelSize - 3);
+        const longestMw = Math.max(0, ...state.rows.map((row) => measuredWidth(row.mw, mwSize, compact ? 700 : 500)));
+        const left = Math.min(compact ? 240 : 360, Math.max(compact ? 105 : 166, Math.ceil(longestName + (compact ? 28 : 34))));
+        const right = state.showMw ? Math.min(compact ? 190 : 220, Math.max(compact ? 83 : 116, Math.ceil(longestMw + (compact ? 30 : 34)))) : 24;
+        const bandWidth = Math.max(compact ? 114 : 718, totalSamples() * state.laneWidth);
         const width = left + bandWidth + right;
-        const top = 82;
-        const bottom = state.showLanes ? 55 : 28;
+        const longestLaneLabel = Math.max(0, ...resolvedLaneLabels().map((label) => measuredWidth(label, state.labelSize)));
+        const top = compact ? Math.max(72, Math.min(170, Math.ceil(longestLaneLabel * .72 + 38))) : 82;
         const rowCount = Math.max(1, state.rows.length);
-        const height = top + bottom + rowCount * state.rowHeight + Math.max(0, rowCount - 1) * state.rowGap;
-        return { width, height, left, right, top, bottom, bandWidth };
+        const contentBottom = top + rowCount * state.rowHeight + Math.max(0, rowCount - 1) * state.rowGap;
+        const footerLineY = contentBottom + 14;
+        const footerLabelY = footerLineY + 23;
+        const bottom = compact && state.footerLabel.trim() ? 86 : (state.showLanes ? 55 : 28);
+        const height = contentBottom + bottom;
+        return { width, height, left, right, top, bottom, bandWidth, contentBottom, footerLineY, footerLabelY };
       }
 
       function drawContainedImage(ctx, row, x, y, width, height) {
@@ -902,25 +1027,39 @@
 
         const samples = Math.max(1, totalSamples());
         const laneWidth = g.bandWidth / samples;
-        let laneOffset = 0;
+        const compact = state.layoutMode === "compact";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillStyle = "#111827";
-        ctx.font = `700 ${state.labelSize}px Arial, "Microsoft YaHei", sans-serif`;
-        state.groups.forEach((group) => {
-          const start = g.left + laneOffset * laneWidth;
-          const end = start + group.count * laneWidth;
-          const label = fittedLabel(group.name, Math.max(18, end - start - 18), state.labelSize);
-          ctx.font = `700 ${label.size}px Arial, "Microsoft YaHei", sans-serif`;
-          ctx.fillText(label.text, (start + end) / 2, 23);
-          ctx.strokeStyle = "#172033";
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(start + Math.min(9, (end - start) * .08), 49);
-          ctx.lineTo(end - Math.min(9, (end - start) * .08), 49);
-          ctx.stroke();
-          laneOffset += group.count;
-        });
+        if (compact) {
+          resolvedLaneLabels().forEach((value, lane) => {
+            const label = fittedLabel(value, Math.max(54, state.laneWidth * 1.45), state.labelSize);
+            ctx.save();
+            ctx.translate(g.left + lane * laneWidth + Math.min(6, laneWidth * .15), g.top - 8);
+            ctx.rotate(-Math.PI / 4);
+            ctx.textAlign = "left";
+            ctx.font = `700 ${label.size}px Arial, "Microsoft YaHei", sans-serif`;
+            ctx.fillText(label.text, 0, 0);
+            ctx.restore();
+          });
+        } else {
+          let laneOffset = 0;
+          ctx.font = `700 ${state.labelSize}px Arial, "Microsoft YaHei", sans-serif`;
+          state.groups.forEach((group) => {
+            const start = g.left + laneOffset * laneWidth;
+            const end = start + group.count * laneWidth;
+            const label = fittedLabel(group.name, Math.max(18, end - start - 18), state.labelSize);
+            ctx.font = `700 ${label.size}px Arial, "Microsoft YaHei", sans-serif`;
+            ctx.fillText(label.text, (start + end) / 2, 23);
+            ctx.strokeStyle = "#172033";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(start + Math.min(9, (end - start) * .08), 49);
+            ctx.lineTo(end - Math.min(9, (end - start) * .08), 49);
+            ctx.stroke();
+            laneOffset += group.count;
+          });
+        }
 
         const rows = state.rows.length ? state.rows : [{ name: "Protein 1", mw: "", image: null, crop: null }];
         rows.forEach((row, index) => {
@@ -930,12 +1069,20 @@
           ctx.font = `700 ${proteinLabel.size}px Arial, "Microsoft YaHei", sans-serif`;
           ctx.textAlign = "right";
           ctx.fillText(proteinLabel.text, g.left - 18, y + state.rowHeight / 2);
-          if (state.showMw) {
-            ctx.fillStyle = "#657187";
-            const mwLabel = fittedLabel(row.mw || "", g.right - 26, Math.max(12, state.labelSize - 3), 500);
-            ctx.font = `500 ${mwLabel.size}px Arial, "Microsoft YaHei", sans-serif`;
+          if (state.showMw && row.mw) {
+            ctx.fillStyle = compact ? "#111827" : "#657187";
+            const mwLabel = fittedLabel(row.mw || "", g.right - 26, compact ? state.labelSize : Math.max(12, state.labelSize - 3), compact ? 700 : 500);
+            ctx.font = `${compact ? 700 : 500} ${mwLabel.size}px Arial, "Microsoft YaHei", sans-serif`;
             ctx.textAlign = "left";
-            ctx.fillText(mwLabel.text, g.left + g.bandWidth + 17, y + state.rowHeight / 2);
+            if (compact) {
+              ctx.strokeStyle = "#111827";
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(g.left + g.bandWidth, y + state.rowHeight / 2);
+              ctx.lineTo(g.left + g.bandWidth + 18, y + state.rowHeight / 2);
+              ctx.stroke();
+            }
+            ctx.fillText(mwLabel.text, g.left + g.bandWidth + (compact ? 24 : 17), y + state.rowHeight / 2);
           }
           const hasImage = drawContainedImage(ctx, row, g.left, y, g.bandWidth, state.rowHeight);
           if (!hasImage) {
@@ -947,13 +1094,27 @@
             ctx.fillText("请上传这一行条带图", g.left + g.bandWidth / 2, y + state.rowHeight / 2);
           }
           if (state.showBorder) {
-            ctx.strokeStyle = "#9ca8b9";
+            ctx.strokeStyle = compact ? "#374151" : "#9ca8b9";
             ctx.lineWidth = 1;
             ctx.strokeRect(g.left + .5, y + .5, g.bandWidth - 1, state.rowHeight - 1);
           }
         });
 
-        if (state.showLanes) {
+        if (compact && state.footerLabel.trim()) {
+          ctx.strokeStyle = "#111827";
+          ctx.lineWidth = 4;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(g.left + 1, g.footerLineY);
+          ctx.lineTo(g.left + g.bandWidth - 1, g.footerLineY);
+          ctx.stroke();
+          ctx.lineCap = "butt";
+          const footer = fittedLabel(state.footerLabel.trim(), g.bandWidth, state.labelSize, 700);
+          ctx.fillStyle = "#111827";
+          ctx.font = `700 ${footer.size}px Arial, "Microsoft YaHei", sans-serif`;
+          ctx.textAlign = "center";
+          ctx.fillText(footer.text, g.left + g.bandWidth / 2, g.footerLabelY);
+        } else if (state.showLanes) {
           const y = g.height - 19;
           ctx.fillStyle = "#657187";
           ctx.font = "500 12px Arial, sans-serif";
@@ -970,6 +1131,10 @@
           state.renderQueued = false;
           const dpr = Math.min(2, window.devicePixelRatio || 1);
           const g = paintFigure(figureCanvas, dpr);
+          const wide = state.layoutMode !== "compact";
+          figureCanvas.classList.toggle("is-wide", wide);
+          figureCanvas.closest(".figure-paper").classList.toggle("is-wide", wide);
+          figureCanvas.style.width = wide ? "100%" : `${g.width}px`;
           figureCanvas.style.aspectRatio = `${g.width} / ${g.height}`;
           const heroG = paintFigure(heroCanvas, 1);
           heroCanvas.style.aspectRatio = `${heroG.width} / ${heroG.height}`;
@@ -1021,7 +1186,7 @@
         return String(value).replace(/[&<>\"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&apos;" }[char]));
       }
 
-      function rowPng(row, width, height, scale = 2) {
+      function rowPng(row, width, height, scale = 3) {
         const canvas = document.createElement("canvas");
         canvas.width = width * scale;
         canvas.height = height * scale;
@@ -1037,32 +1202,47 @@
         const samples = Math.max(1, totalSamples());
         const laneWidth = g.bandWidth / samples;
         const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${g.width}" height="${g.height}" viewBox="0 0 ${g.width} ${g.height}">`, `<rect width="100%" height="100%" fill="white"/>`];
-        let laneOffset = 0;
-        state.groups.forEach((group) => {
-          const start = g.left + laneOffset * laneWidth;
-          const end = start + group.count * laneWidth;
-          const label = fittedLabel(group.name, Math.max(18, end - start - 18), state.labelSize);
-          parts.push(`<text x="${(start + end) / 2}" y="29" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${label.size}" font-weight="700" fill="#111827">${xml(label.text)}</text>`);
-          parts.push(`<line x1="${start + Math.min(9, (end - start) * .08)}" y1="49" x2="${end - Math.min(9, (end - start) * .08)}" y2="49" stroke="#172033" stroke-width="2"/>`);
-          laneOffset += group.count;
-        });
+        const compact = state.layoutMode === "compact";
+        if (compact) {
+          resolvedLaneLabels().forEach((value, lane) => {
+            const label = fittedLabel(value, Math.max(54, state.laneWidth * 1.45), state.labelSize);
+            const x = g.left + lane * laneWidth + Math.min(6, laneWidth * .15);
+            const y = g.top - 8;
+            parts.push(`<text transform="translate(${x} ${y}) rotate(-45)" text-anchor="start" dominant-baseline="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${label.size}" font-weight="700" fill="#111827">${xml(label.text)}</text>`);
+          });
+        } else {
+          let laneOffset = 0;
+          state.groups.forEach((group) => {
+            const start = g.left + laneOffset * laneWidth;
+            const end = start + group.count * laneWidth;
+            const label = fittedLabel(group.name, Math.max(18, end - start - 18), state.labelSize);
+            parts.push(`<text x="${(start + end) / 2}" y="29" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${label.size}" font-weight="700" fill="#111827">${xml(label.text)}</text>`);
+            parts.push(`<line x1="${start + Math.min(9, (end - start) * .08)}" y1="49" x2="${end - Math.min(9, (end - start) * .08)}" y2="49" stroke="#172033" stroke-width="2"/>`);
+            laneOffset += group.count;
+          });
+        }
         const rows = state.rows.length ? state.rows : [];
         rows.forEach((row, index) => {
           const y = g.top + index * (state.rowHeight + state.rowGap);
           const proteinLabel = fittedLabel(row.name || `Protein ${index + 1}`, g.left - 30, state.labelSize);
           parts.push(`<text x="${g.left - 18}" y="${y + state.rowHeight / 2}" dominant-baseline="middle" text-anchor="end" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${proteinLabel.size}" font-weight="700" fill="#111827">${xml(proteinLabel.text)}</text>`);
           if (state.showMw && row.mw) {
-            const mwLabel = fittedLabel(row.mw, g.right - 26, Math.max(12, state.labelSize - 3), 500);
-            parts.push(`<text x="${g.left + g.bandWidth + 17}" y="${y + state.rowHeight / 2}" dominant-baseline="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${mwLabel.size}" fill="#657187">${xml(mwLabel.text)}</text>`);
+            const mwLabel = fittedLabel(row.mw, g.right - 26, compact ? state.labelSize : Math.max(12, state.labelSize - 3), compact ? 700 : 500);
+            if (compact) parts.push(`<line x1="${g.left + g.bandWidth}" y1="${y + state.rowHeight / 2}" x2="${g.left + g.bandWidth + 18}" y2="${y + state.rowHeight / 2}" stroke="#111827"/>`);
+            parts.push(`<text x="${g.left + g.bandWidth + (compact ? 24 : 17)}" y="${y + state.rowHeight / 2}" dominant-baseline="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${mwLabel.size}" font-weight="${compact ? 700 : 500}" fill="${compact ? "#111827" : "#657187"}">${xml(mwLabel.text)}</text>`);
           }
           if (row.image) {
             parts.push(`<image href="${rowPng(row, g.bandWidth, state.rowHeight)}" x="${g.left}" y="${y}" width="${g.bandWidth}" height="${state.rowHeight}"/>`);
           } else {
             parts.push(`<rect x="${g.left}" y="${y}" width="${g.bandWidth}" height="${state.rowHeight}" fill="#f0f3f7"/>`);
           }
-          if (state.showBorder) parts.push(`<rect x="${g.left + .5}" y="${y + .5}" width="${g.bandWidth - 1}" height="${state.rowHeight - 1}" fill="none" stroke="#9ca8b9"/>`);
+          if (state.showBorder) parts.push(`<rect x="${g.left + .5}" y="${y + .5}" width="${g.bandWidth - 1}" height="${state.rowHeight - 1}" fill="none" stroke="${compact ? "#374151" : "#9ca8b9"}"/>`);
         });
-        if (state.showLanes) {
+        if (compact && state.footerLabel.trim()) {
+          const footer = fittedLabel(state.footerLabel.trim(), g.bandWidth, state.labelSize, 700);
+          parts.push(`<line x1="${g.left + 1}" y1="${g.footerLineY}" x2="${g.left + g.bandWidth - 1}" y2="${g.footerLineY}" stroke="#111827" stroke-width="4" stroke-linecap="round"/>`);
+          parts.push(`<text x="${g.left + g.bandWidth / 2}" y="${g.footerLabelY}" dominant-baseline="middle" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${footer.size}" font-weight="700" fill="#111827">${xml(footer.text)}</text>`);
+        } else if (state.showLanes) {
           for (let lane = 0; lane < samples; lane += 1) parts.push(`<text x="${g.left + (lane + .5) * laneWidth}" y="${g.height - 15}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#657187">${lane + 1}</text>`);
         }
         parts.push("</svg>");
@@ -1272,6 +1452,7 @@
         row.brightness = draft.brightness;
         row.contrast = draft.contrast;
         row.invert = draft.invert;
+        state.demoLoaded = false;
         markDirty();
         closeEditor();
         renderRows();
@@ -1281,12 +1462,17 @@
 
       $("#applyGroups").addEventListener("click", () => {
         try {
-          state.groups = parseGroups($("#groupInput").value);
+          const groups = parseGroups($("#groupInput").value);
+          const laneLabelText = $("#laneLabelInput").value;
+          const laneLabels = parseLaneLabels(laneLabelText, groups);
+          state.groups = groups;
+          state.laneLabels = laneLabels;
           $("#groupInput").value = groupsToText(state.groups);
+          $("#laneLabelInput").value = laneLabelText.trim() ? laneLabelsToText(state.laneLabels) : "";
           markDirty();
           renderGroupSummary();
           requestRender();
-          toast("样本分组已更新");
+          toast("样本分组与泳道标签已更新");
         } catch (error) { toast(error.message); }
       });
       $("#loadDemo").addEventListener("click", () => {
@@ -1296,6 +1482,7 @@
       $("#addRow").addEventListener("click", () => {
         if (state.rows.length >= MAX_ROWS) return toast(`每个图组最多支持 ${MAX_ROWS} 行蛋白`);
         state.rows.push(blankRow());
+        state.demoLoaded = false;
         markDirty();
         renderRows();
         requestRender();
@@ -1307,7 +1494,35 @@
       ["dragleave", "drop"].forEach((type) => $("#dropzone").addEventListener(type, (event) => { event.preventDefault(); $("#dropzone").classList.remove("is-over"); }));
       $("#dropzone").addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
 
-      [["rowHeight", "rowHeightValue", "rowHeight"], ["rowGap", "rowGapValue", "rowGap"], ["labelSize", "labelSizeValue", "labelSize"]].forEach(([inputId, valueId, key]) => {
+      $("#layoutMode").addEventListener("change", (event) => { state.layoutMode = event.target.value; syncLaneToggleAvailability(); markDirty(); requestRender(); });
+      $("#footerLabel").addEventListener("input", (event) => { state.footerLabel = event.target.value; syncLaneToggleAvailability(); markDirty(); requestRender(); });
+      $("#compactPreset").addEventListener("click", () => {
+        const laneLabelText = $("#laneLabelInput").value;
+        try {
+          state.groups = parseGroups($("#groupInput").value);
+          state.laneLabels = parseLaneLabels(laneLabelText, state.groups);
+        } catch (error) {
+          return toast(error.message);
+        }
+        state.layoutMode = "compact";
+        state.footerLabel = $("#footerLabel").value.trim() || "HCC1954";
+        state.laneWidth = 38;
+        state.rowHeight = 40;
+        state.rowGap = 7;
+        state.labelSize = 16;
+        state.showMw = true;
+        state.showLanes = false;
+        state.showBorder = true;
+        $("#groupInput").value = groupsToText(state.groups);
+        $("#laneLabelInput").value = laneLabelText.trim() ? laneLabelsToText(state.laneLabels) : "";
+        syncLayoutControls();
+        renderGroupSummary();
+        markDirty();
+        requestRender();
+        toast("已套用期刊紧凑样式");
+      });
+
+      [["laneWidth", "laneWidthValue", "laneWidth"], ["rowHeight", "rowHeightValue", "rowHeight"], ["rowGap", "rowGapValue", "rowGap"], ["labelSize", "labelSizeValue", "labelSize"]].forEach(([inputId, valueId, key]) => {
         $("#" + inputId).addEventListener("input", (event) => {
           state[key] = Number(event.target.value);
           $("#" + valueId).textContent = `${event.target.value} px`;
