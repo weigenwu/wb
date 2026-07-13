@@ -433,10 +433,10 @@
           <section class="control-block">
             <div class="control-title"><h3>样本分组</h3><span class="step">1</span></div>
             <label class="caption" for="groupInput">每组名称与样本数</label>
-            <textarea id="groupInput" spellcheck="false">sh-NC × 1, sh1 × 1, sh2 × 1</textarea>
+            <textarea id="groupInput" spellcheck="false">Control × 1, Group 1 × 1, Group 2 × 1</textarea>
             <p class="field-help">格式示例：Control × 3, Drug × 3；最多 24 个样本。</p>
             <label class="caption" for="laneLabelInput" style="margin-top:14px">泳道标签（可选）</label>
-            <textarea id="laneLabelInput" spellcheck="false" placeholder="例如 sh-NC, sh1, sh2"></textarea>
+            <textarea id="laneLabelInput" spellcheck="false" placeholder="例如 Control, Group 1, Group 2"></textarea>
             <p class="field-help">逗号分隔，数量须与总样本数一致；留空会自动生成。</p>
             <div class="inline-actions">
               <button class="button small primary" id="applyGroups" type="button">应用分组与标签</button>
@@ -465,7 +465,7 @@
               <option value="compact" selected>倾斜泳道标签（期刊紧凑）</option>
             </select>
             <label class="caption" for="footerLabel" style="margin-top:14px">底部说明 / 细胞系</label>
-            <input id="footerLabel" type="text" maxlength="40" value="HCC1954" placeholder="例如 HCC1954">
+            <input id="footerLabel" type="text" maxlength="40" value="Cell line" placeholder="例如 Cell line">
             <div class="inline-actions">
               <button class="button small" id="compactPreset" type="button">套用参考图样式</button>
             </div>
@@ -563,11 +563,11 @@
       const MAX_TOTAL_BYTES = 120 * 1024 * 1024;
       const MAX_PIXELS = 50_000_000;
       const state = {
-        groups: [{ name: "sh-NC", count: 1 }, { name: "sh1", count: 1 }, { name: "sh2", count: 1 }],
-        laneLabels: ["sh-NC", "sh1", "sh2"],
+        groups: [{ name: "Control", count: 1 }, { name: "Group 1", count: 1 }, { name: "Group 2", count: 1 }],
+        laneLabels: ["Control", "Group 1", "Group 2"],
         rows: [],
         layoutMode: "compact",
-        footerLabel: "HCC1954",
+        footerLabel: "Cell line",
         laneWidth: 38,
         rowHeight: 40,
         rowGap: 7,
@@ -812,10 +812,10 @@
 
       async function loadDemo(silent = false) {
         state.rows.forEach((row) => { if (row.objectUrl) URL.revokeObjectURL(row.objectUrl); });
-        state.groups = [{ name: "sh-NC", count: 1 }, { name: "sh1", count: 1 }, { name: "sh2", count: 1 }];
+        state.groups = [{ name: "Control", count: 1 }, { name: "Group 1", count: 1 }, { name: "Group 2", count: 1 }];
         state.laneLabels = defaultLaneLabels(state.groups);
         state.layoutMode = "compact";
-        state.footerLabel = "HCC1954";
+        state.footerLabel = "Cell line";
         state.laneWidth = 38;
         state.rowHeight = 40;
         state.rowGap = 7;
@@ -824,8 +824,8 @@
         state.showLanes = false;
         state.showBorder = true;
         const definitions = [
-          ["HER2", "185 KD", [.88, .72, .63], 21],
-          ["GAPDH", "36 KD", [.68, .72, .70], 47]
+          ["Protein A", "100 KD", [.88, .72, .63], 21],
+          ["Protein B", "40 KD", [.68, .72, .70], 47]
         ];
         state.rows = await Promise.all(definitions.map(async ([name, mw, intensities, seed]) => {
           const src = demoStrip(intensities, seed);
@@ -1506,7 +1506,7 @@
           return toast(error.message);
         }
         state.layoutMode = "compact";
-        state.footerLabel = $("#footerLabel").value.trim() || "HCC1954";
+        state.footerLabel = $("#footerLabel").value.trim() || "Cell line";
         state.laneWidth = 38;
         state.rowHeight = 40;
         state.rowGap = 7;
