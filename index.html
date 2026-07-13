@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="一个在浏览器本地运行的 Western blot 科研组图工具。">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232864e8'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='Arial' font-size='22' font-weight='700' fill='white'%3EWB%3C/text%3E%3C/svg%3E">
-  <title>BlotBoard · WB 科研组图</title>
+  <title>FigureLab · WB 科研组图</title>
   <style>
     :root {
       --ink: #142033;
@@ -66,9 +66,11 @@
       box-shadow: 0 8px 18px rgba(40, 100, 232, .24);
       font-size: 13px;
     }
-    .topbar nav { display: flex; align-items: center; gap: 24px; color: var(--muted); font-size: 14px; font-weight: 700; }
+    .topbar nav { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; font-weight: 700; }
     .topbar nav a:hover { color: var(--blue); }
     .nav-cta { padding: 10px 15px; border-radius: 10px; color: #fff !important; background: var(--blue); }
+    .tool-tab { padding: 9px 11px; border-radius: 9px; }
+    .tool-tab[aria-current="page"] { color: var(--blue); background: var(--blue-soft); }
 
     .hero {
       display: grid;
@@ -349,7 +351,11 @@
       .control-block:last-child { border-right: 0; }
     }
     @media (max-width: 760px) {
-      .topbar nav a:not(.nav-cta) { display: none; }
+      .topbar { padding-inline: 12px; gap: 8px; }
+      .brand > span:last-child { display: none; }
+      .topbar nav { gap: 4px; }
+      .topbar nav .tool-tab { display: inline-flex; padding: 8px 9px; font-size: 12px; }
+      .topbar .nav-cta { display: none; }
       .hero { min-height: 0; padding-bottom: 42px; }
       h1 { font-size: clamp(39px, 12vw, 58px); }
       .promise-strip, .features-grid, .controls { grid-template-columns: 1fr; }
@@ -384,13 +390,13 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="#top" aria-label="BlotBoard 首页">
-      <span class="brand-mark">WB</span>
-      <span>BlotBoard</span>
+    <a class="brand" href="#top" aria-label="FigureLab WB 组图首页">
+      <span class="brand-mark">Fig</span>
+      <span>FigureLab</span>
     </a>
-    <nav aria-label="主导航">
-      <a href="#studio">在线组图</a>
-      <a href="#features">特点</a>
+    <nav aria-label="组图工具">
+      <a class="tool-tab" href="https://if-group-pictures.onrender.com/">荧光 / IHC</a>
+      <a class="tool-tab" href="./" aria-current="page">WB 组图</a>
       <a class="nav-cta" href="#studio">开始使用</a>
     </nav>
   </header>
@@ -407,7 +413,7 @@
         </div>
         <p class="privacy-note">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2m-9 0h8a2 2 0 0 1 2 2v7H6v-7a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-          无需注册；实验图片只在当前浏览器中处理。
+          本地处理：实验图片只在当前浏览器中读取，不会上传服务器。
         </p>
       </div>
 
@@ -549,7 +555,7 @@
     </section>
   </main>
 
-  <footer><div><strong>BlotBoard</strong> · 本地 WB 科研组图工具</div><div>浏览器原生运行 · 无需上传 · 无需安装</div></footer>
+  <footer><div><strong>FigureLab</strong> · WB 科研组图</div><div>浏览器原生运行 · 无需上传 · 无需安装</div></footer>
 
   <dialog id="imageEditor" aria-labelledby="editorTitle" aria-describedby="editorHelp">
     <div class="dialog-head">
