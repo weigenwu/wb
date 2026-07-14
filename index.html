@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#2864e8">
   <link rel="manifest" href="./manifest.webmanifest">
-  <meta name="description" content="一个在浏览器本地运行的 Western blot 科研组图工具。">
+  <meta name="description" content="实验室工作台中的 Western blot 本地组图、灰度定量与投稿导出工具。">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232864e8'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='Arial' font-size='22' font-weight='700' fill='white'%3EWB%3C/text%3E%3C/svg%3E">
-  <title>FigureLab · WB 科研组图</title>
+  <title>实验室工作台 · WB 组图与灰度</title>
   <style>
     :root {
       --ink: #142033;
@@ -18,6 +18,10 @@
       --blue: #2864e8;
       --blue-dark: #1d4fbd;
       --blue-soft: #eaf1ff;
+      --suite-teal: #08766d;
+      --suite-teal-dark: #075d58;
+      --suite-teal-soft: #dff4f0;
+      --suite-amber: #d99022;
       --mint: #dff7ee;
       --mint-ink: #0d7055;
       --orange: #ff8a4c;
@@ -34,7 +38,7 @@
       background:
         radial-gradient(circle at 9% 7%, rgba(40, 100, 232, .09), transparent 24rem),
         var(--bg);
-      font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+      font-family: Arial, "Microsoft YaHei", "PingFang SC", sans-serif;
     }
     button, input, textarea, select { font: inherit; }
     button, a { -webkit-tap-highlight-color: transparent; }
@@ -50,29 +54,65 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      min-height: 68px;
-      padding: 0 clamp(18px, 5vw, 74px);
-      border-bottom: 1px solid rgba(220, 228, 239, .9);
-      background: rgba(245, 248, 252, .9);
+      gap: 18px;
+      min-height: 76px;
+      padding: 10px clamp(18px, 5vw, 74px) 13px;
+      border-bottom: 1px solid rgba(8, 118, 109, .22);
+      background: linear-gradient(120deg, rgba(255, 255, 255, .96), rgba(238, 250, 247, .96) 58%, rgba(234, 241, 255, .96));
+      box-shadow: 0 8px 28px rgba(21, 48, 53, .08);
       backdrop-filter: blur(16px);
     }
-    .brand { display: inline-flex; align-items: center; gap: 11px; font-weight: 900; letter-spacing: -.02em; }
+    .topbar::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--suite-teal), var(--blue), var(--suite-amber));
+    }
+    .suite-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand { display: inline-flex; align-items: center; gap: 11px; min-width: 0; }
     .brand-mark {
       display: grid;
-      width: 34px;
-      height: 34px;
+      flex: 0 0 auto;
+      width: 38px;
+      height: 38px;
       place-items: center;
       border-radius: 10px;
       color: #fff;
-      background: var(--blue);
-      box-shadow: 0 8px 18px rgba(40, 100, 232, .24);
-      font-size: 13px;
+      background: linear-gradient(135deg, var(--suite-teal), var(--blue));
+      box-shadow: 0 8px 18px rgba(8, 118, 109, .22);
+      font-size: 12px;
+      font-weight: 900;
     }
-    .topbar nav { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; font-weight: 700; }
-    .topbar nav a:hover { color: var(--blue); }
-    .nav-cta { padding: 10px 15px; border-radius: 10px; color: #fff !important; background: var(--blue); }
-    .tool-tab { padding: 9px 11px; border-radius: 9px; }
-    .tool-tab[aria-current="page"] { color: var(--blue); background: var(--blue-soft); }
+    .suite-brand-copy { display: grid; min-width: 0; line-height: 1.15; }
+    .suite-brand-copy strong { font-size: 15px; letter-spacing: -.01em; white-space: nowrap; }
+    .suite-brand-copy small { margin-top: 4px; color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .local-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 9px;
+      border-radius: 999px;
+      color: var(--suite-teal-dark);
+      background: var(--suite-teal-soft);
+      font-size: 11px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .local-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #20a67a; box-shadow: 0 0 0 3px rgba(32, 166, 122, .13); }
+    .suite-nav { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 14px; font-weight: 800; }
+    .tool-tab {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+      padding: 8px 12px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      white-space: nowrap;
+    }
+    .tool-tab:hover, .tool-tab:focus-visible { border-color: rgba(8, 118, 109, .32); color: var(--suite-teal-dark); background: rgba(223, 244, 240, .7); }
+    .tool-tab[aria-current="page"] { border-color: rgba(40, 100, 232, .22); color: var(--blue-dark); background: linear-gradient(135deg, var(--suite-teal-soft), var(--blue-soft)); }
 
     .hero {
       display: grid;
@@ -178,7 +218,7 @@
     .promise-strip strong { margin-bottom: 7px; }
     .promise-strip span { color: var(--muted); font-size: 14px; }
 
-    .studio-section { padding: 80px clamp(14px, 4vw, 56px) 94px; background: #fff; border-block: 1px solid var(--line); }
+    .studio-section { padding: 80px clamp(14px, 4vw, 56px) 94px; background: #fff; border-block: 1px solid var(--line); scroll-margin-top: 92px; }
     .section-head { max-width: 760px; margin: 0 auto 40px; text-align: center; }
     .section-head .eyebrow { justify-content: center; }
     .section-head h2 { margin-bottom: 15px; font-size: clamp(32px, 4vw, 48px); letter-spacing: -.035em; }
@@ -405,11 +445,12 @@
       .control-block:last-child { border-right: 0; }
     }
     @media (max-width: 760px) {
-      .topbar { padding-inline: 12px; gap: 8px; }
-      .brand > span:last-child { display: none; }
-      .topbar nav { gap: 4px; }
-      .topbar nav .tool-tab { display: inline-flex; padding: 8px 9px; font-size: 12px; }
-      .topbar .nav-cta { display: none; }
+      .topbar { min-height: 64px; padding: 8px 12px 11px; gap: 10px; }
+      .suite-brand { gap: 8px; }
+      .suite-brand-copy small { display: none; }
+      .local-chip { padding: 5px 7px; }
+      .suite-nav { gap: 4px; }
+      .suite-nav .tool-tab { padding: 8px 9px; font-size: 12px; }
       .hero { min-height: 0; padding-bottom: 42px; }
       h1 { font-size: clamp(39px, 12vw, 58px); }
       .promise-strip, .features-grid, .controls { grid-template-columns: 1fr; }
@@ -427,6 +468,11 @@
       footer { align-items: flex-start; flex-direction: column; }
     }
     @media (max-width: 520px) {
+      .topbar { display: grid; grid-template-columns: 1fr; align-items: stretch; gap: 6px; }
+      .suite-brand { justify-content: space-between; padding-inline: 3px; }
+      .suite-nav { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .suite-nav .tool-tab { padding-inline: 5px; }
+      .studio-section { scroll-margin-top: 112px; }
       .hero-actions .button { width: 100%; }
       .hero-metrics { grid-template-columns: 1fr; }
       .studio-section { padding-inline: 8px; }
@@ -446,15 +492,17 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="#top" aria-label="FigureLab WB 组图首页">
-      <span class="brand-mark">Fig</span>
-      <span>FigureLab</span>
-    </a>
-    <nav aria-label="组图工具">
-      <a class="tool-tab" href="https://weigenwu.github.io/ikun-calculator/" target="_blank" rel="noopener" title="打开实验计算器门户">实验计算器 ↗</a>
-      <a class="tool-tab" href="https://if-group-pictures.onrender.com/" target="_blank" rel="noopener" title="在新标签页打开；免费服务休眠后首次打开可能需要约 1 分钟">荧光 / IHC ↗</a>
-      <a class="tool-tab" href="#top" aria-current="page">WB 组图</a>
-      <a class="nav-cta" href="#studio">开始使用</a>
+    <div class="suite-brand">
+      <a class="brand" href="https://weigenwu.github.io/ikun-calculator/" aria-label="返回实验室统一入口">
+        <span class="brand-mark" aria-hidden="true">Lab</span>
+        <span class="suite-brand-copy"><strong>实验室工作台</strong><small>WB 科研工作台</small></span>
+      </a>
+      <span class="local-chip" title="原始图片只在当前浏览器中处理">本地处理</span>
+    </div>
+    <nav class="suite-nav" aria-label="实验室工具套件">
+      <a class="tool-tab" href="https://weigenwu.github.io/ikun-calculator/">实验流程</a>
+      <a class="tool-tab" href="#top" aria-current="page">WB</a>
+      <a class="tool-tab" href="https://if-group-pictures.onrender.com/" title="IF/IHC 图片需要上传至处理服务器；免费服务休眠后首次打开可能需要约 1 分钟">IF / IHC</a>
     </nav>
   </header>
 
@@ -712,6 +760,11 @@
       "use strict";
 
       const $ = (selector) => document.querySelector(selector);
+      let shouldRestoreStudioAnchor = location.hash === "#studio";
+      const cancelStudioAnchorRestore = () => { shouldRestoreStudioAnchor = false; };
+      window.addEventListener("wheel", cancelStudioAnchorRestore, { once: true, passive: true });
+      window.addEventListener("touchstart", cancelStudioAnchorRestore, { once: true, passive: true });
+      window.addEventListener("pointerdown", cancelStudioAnchorRestore, { once: true, passive: true });
       const MAX_ROWS = 20;
       const MAX_FILE_BYTES = 25 * 1024 * 1024;
       const MAX_TOTAL_BYTES = 120 * 1024 * 1024;
@@ -4136,6 +4189,10 @@
         $(".workspace").inert = false;
         $(".workspace").removeAttribute("aria-busy");
         resetUndoBaseline();
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          if (shouldRestoreStudioAnchor && location.hash === "#studio") $("#studio").scrollIntoView({ block: "start" });
+          shouldRestoreStudioAnchor = false;
+        }));
       });
     })();
   </script>

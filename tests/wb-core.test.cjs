@@ -198,11 +198,27 @@ function testPwaShell() {
   const root = path.join(__dirname, "..");
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.webmanifest"), "utf8"));
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  assert.equal(manifest.name, "实验室工作台 · WB 组图与灰度");
+  assert.equal(manifest.short_name, "WB 工作台");
   assert.equal(manifest.display, "standalone");
   assert.ok(manifest.icons.some(({ sizes }) => sizes === "any"));
   assert.match(html, /rel="manifest" href="\.\/manifest\.webmanifest"/);
   assert.match(html, /navigator\.serviceWorker\.register\("\.\/sw\.js"\)/);
   assert.ok(fs.readFileSync(path.join(root, "sw.js"), "utf8").includes("./wb-core.js"));
+}
+
+function testUnifiedSuiteShell() {
+  const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+  const shell = html.match(/<header class="topbar">[\s\S]*?<\/header>/)?.[0] || "";
+  assert.match(html, /<title>实验室工作台 · WB 组图与灰度<\/title>/);
+  assert.match(html, /font-family: Arial, "Microsoft YaHei", "PingFang SC", sans-serif/);
+  assert.match(shell, /<nav class="suite-nav" aria-label="实验室工具套件">/);
+  assert.match(shell, /实验室工作台/);
+  assert.match(shell, /href="https:\/\/weigenwu\.github\.io\/ikun-calculator\/">实验流程<\/a>/);
+  assert.match(shell, /href="#top" aria-current="page">WB<\/a>/);
+  assert.match(shell, /href="https:\/\/if-group-pictures\.onrender\.com\/"[^>]*>IF \/ IHC<\/a>/);
+  assert.match(shell, /本地处理/);
+  assert.doesNotMatch(shell, /target="_blank"/);
 }
 
 [
@@ -214,6 +230,7 @@ function testPwaShell() {
   testNormalizationAndPrism,
   testQc,
   testPwaShell,
+  testUnifiedSuiteShell,
 ].forEach((test) => {
   test();
   console.log(`✓ ${test.name}`);
