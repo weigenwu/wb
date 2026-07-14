@@ -159,6 +159,7 @@ async function waitForServer(url) {
 
     await page.locator("#openPanels").click();
     await page.locator("#addQuantPanel").click();
+    await page.waitForFunction(() => document.querySelectorAll("#panelGrid .panel-card").length === 2);
     assert.equal(await page.locator("#panelGrid .panel-card").count(), 2);
     const panelDownload = page.waitForEvent("download");
     await page.locator("#exportPanelPng").click();
