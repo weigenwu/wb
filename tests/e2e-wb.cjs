@@ -196,6 +196,29 @@ async function waitForServer(url) {
     await page.locator("#openPanels").click();
     assert.equal(await page.locator("#panelGrid .panel-card").count(), 2);
     await page.locator('[data-close-dialog="panelDialog"]').click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`http://127.0.0.1:${port}/#studio`, { waitUntil: "networkidle" });
+    assert.equal(await page.locator(".suite-nav .tool-tab").count(), 3);
+    await page.waitForFunction(() => {
+      const header = document.querySelector(".topbar")?.getBoundingClientRect();
+      const studio = document.querySelector("#studio")?.getBoundingClientRect();
+      return header && studio && studio.top >= header.bottom - 1 && studio.top < window.innerHeight;
+    });
+    const mobileShell = await page.evaluate(() => {
+      const header = document.querySelector(".topbar").getBoundingClientRect();
+      const studio = document.querySelector("#studio").getBoundingClientRect();
+      const links = [...document.querySelectorAll(".suite-nav .tool-tab")].map((link) => link.getBoundingClientRect());
+      return {
+        pageWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+        shellInsideViewport: header.left >= 0 && header.right <= window.innerWidth
+          && links.every((link) => link.left >= 0 && link.right <= window.innerWidth),
+        studioVisible: studio.top >= header.bottom - 1 && studio.top < window.innerHeight,
+      };
+    });
+    assert.ok(mobileShell.pageWidth <= mobileShell.viewportWidth + 1, "mobile page must not overflow horizontally");
+    assert.ok(mobileShell.shellInsideViewport, "mobile suite navigation must stay inside the viewport");
+    assert.ok(mobileShell.studioVisible, "#studio must land below the sticky header and inside the viewport");
     if (process.env.E2E_SCREENSHOT) await page.screenshot({ path: process.env.E2E_SCREENSHOT, fullPage: true });
     assert.deepEqual(errors, []);
     console.log("WB browser E2E passed: TIFF upload, raw quantification, Prism, panel, TIFF and compliance package.");
