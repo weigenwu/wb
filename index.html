@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#2864e8">
+  <link rel="manifest" href="./manifest.webmanifest">
   <meta name="description" content="一个在浏览器本地运行的 Western blot 科研组图工具。">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232864e8'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='Arial' font-size='22' font-weight='700' fill='white'%3EWB%3C/text%3E%3C/svg%3E">
   <title>FigureLab · WB 科研组图</title>
@@ -233,6 +235,12 @@
     .row-thumb { display: grid; width: 44px; height: 38px; place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; color: #9aa8bb; background: #eef2f7; font-size: 10px; }
     .row-thumb img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(1); }
     .protein-row input { min-width: 0; min-height: 36px; font-size: 12px; }
+    .row-science { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 8px; }
+    .row-science label { display: grid; gap: 4px; color: var(--muted); font-size: 10px; font-weight: 750; }
+    .row-science select, .row-science input { min-width: 0; min-height: 34px; padding: 0 8px; font-size: 11px; }
+    .row-science .wide { grid-column: 1 / -1; }
+    .drag-handle { cursor: grab; touch-action: none; }
+    .protein-row.is-dragging { opacity: .48; }
     .row-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
     .icon-button, .text-button {
       min-height: 30px;
@@ -336,6 +344,37 @@
     .dialog-foot { border-top: 1px solid var(--line); }
     .dialog-foot p { max-width: 520px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
     .dialog-actions { display: flex; gap: 8px; }
+    .science-dialog { width: min(1120px, calc(100vw - 28px)); }
+    .science-body { display: grid; gap: 16px; padding: 18px; }
+    .science-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+    .science-toolbar label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 750; }
+    .science-toolbar select, .science-toolbar input { min-width: 130px; min-height: 38px; }
+    .check-grid { display: grid; gap: 10px; }
+    .check-section { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #fbfcfe; }
+    .check-section h3 { margin: 0 0 9px; font-size: 14px; }
+    .check-section ul { margin: 0; padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+    .check-section.error { border-color: #efb5b5; background: #fff7f7; }
+    .check-section.warning { border-color: #f2d19d; background: #fffaf1; }
+    .check-section.pass { border-color: #a9dfcf; background: #f4fcf9; }
+    .quant-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; }
+    .quant-stage { overflow: auto; min-height: 360px; padding: 12px; border-radius: 12px; background: #17202e; }
+    #quantCanvas { display: block; max-width: 100%; height: auto; margin: auto; touch-action: none; cursor: crosshair; }
+    .quant-side { display: grid; align-content: start; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #f8faff; }
+    .quant-side label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 750; }
+    .sample-map { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .sample-map th, .sample-map td { padding: 6px; border: 1px solid var(--line); text-align: left; }
+    .sample-map input, .sample-map select { min-width: 90px; min-height: 31px; padding: 0 6px; font-size: 11px; }
+    .results-table { overflow: auto; max-height: 260px; border: 1px solid var(--line); border-radius: 10px; }
+    .results-table table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    .results-table th, .results-table td { padding: 6px; border-bottom: 1px solid var(--line); white-space: nowrap; text-align: right; }
+    .results-table th:first-child, .results-table td:first-child { text-align: left; }
+    #quantPlot { width: 100%; max-height: 300px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+    .panel-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .panel-card { position: relative; min-height: 180px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: #f8faff; }
+    .panel-card img { display: block; width: 100%; height: 150px; object-fit: contain; background: #fff; }
+    .panel-label { position: absolute; top: 14px; left: 14px; z-index: 2; font: 700 18px Arial, sans-serif; }
+    .history-list { display: grid; gap: 8px; }
+    .history-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
 
     .toast {
       position: fixed;
@@ -382,6 +421,7 @@
       .export-stack { width: 100%; }
       .export-note { text-align: left; }
       .dialog-body { grid-template-columns: 1fr; }
+      .quant-layout { grid-template-columns: 1fr; }
       .editor-controls { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 16px; }
       .dialog-foot { align-items: flex-start; flex-direction: column; }
       footer { align-items: flex-start; flex-direction: column; }
@@ -411,6 +451,7 @@
       <span>FigureLab</span>
     </a>
     <nav aria-label="组图工具">
+      <a class="tool-tab" href="https://weigenwu.github.io/ikun-calculator/" target="_blank" rel="noopener" title="打开实验计算器门户">实验计算器 ↗</a>
       <a class="tool-tab" href="https://if-group-pictures.onrender.com/" target="_blank" rel="noopener" title="在新标签页打开；免费服务休眠后首次打开可能需要约 1 分钟">荧光 / IHC ↗</a>
       <a class="tool-tab" href="#top" aria-current="page">WB 组图</a>
       <a class="nav-cta" href="#studio">开始使用</a>
@@ -537,16 +578,30 @@
                 <label class="export-setting" for="pngDpi">PNG 分辨率
                   <select id="pngDpi"><option value="300" selected>300 DPI</option><option value="600">600 DPI</option></select>
                 </label>
+                <label class="export-setting" for="journalProfile">投稿预设
+                  <select id="journalProfile"><option value="preserve" selected>保持 1 cm/泳道</option><option value="single">单栏 8.9 cm</option><option value="double">双栏 18.3 cm</option></select>
+                </label>
                 <button class="button small primary" id="exportPng" type="button">导出 PNG</button>
+                <button class="button small" id="exportTiff" type="button">导出 TIFF</button>
+                <button class="button small" id="exportPdf" type="button">导出 PDF</button>
                 <button class="button small" id="exportSvg" type="button">导出厘米 SVG</button>
                 <button class="button small" id="copyPng" type="button">复制图片</button>
               </div>
               <div class="project-actions">
+                <button class="button small primary" id="openPreflight" type="button">投稿检查</button>
+                <button class="button small" id="openQuant" type="button">灰度定量</button>
+                <button class="button small" id="openPanels" type="button">多面板排版</button>
+                <button class="button small" id="exportPackage" type="button">投稿合规包</button>
                 <button class="button small" id="newProject" type="button">新建图组</button>
                 <input id="projectFile" type="file" accept=".wb-project,application/json" hidden>
+                <input id="panelFile" type="file" accept=".png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,image/*" multiple hidden>
                 <button class="button small" id="saveProject" type="button">下载项目文件</button>
                 <button class="button small" id="openProject" type="button">导入项目文件</button>
                 <button class="button small" id="exportAudit" type="button">导出处理记录 CSV</button>
+                <button class="button small" id="saveTemplate" type="button">保存版式模板</button>
+                <button class="button small" id="openHistory" type="button">版本历史</button>
+                <button class="button small" id="undoAction" type="button" title="Ctrl+Z">撤销</button>
+                <button class="button small" id="redoAction" type="button" title="Ctrl+Shift+Z">重做</button>
                 <span class="autosave-status" id="autosaveStatus" aria-live="polite">自动保存：正在准备</span>
               </div>
             </div>
@@ -598,9 +653,60 @@
     </div>
   </dialog>
 
+  <dialog id="preflightDialog" class="science-dialog" aria-labelledby="preflightTitle">
+    <div class="dialog-head"><div><h2 id="preflightTitle">投稿完整性检查</h2><p>检查只提示风险，不会修改原始图片或自动修复。</p></div><button class="icon-button" data-close-dialog="preflightDialog" type="button" aria-label="关闭">✕</button></div>
+    <div class="science-body"><div id="preflightResults" class="check-grid"></div></div>
+    <div class="dialog-foot"><p>未发现端点饱和不等于信号处于线性检测范围；请结合曝光梯度和实验记录判断。</p><div class="dialog-actions"><button class="button small" id="downloadPreflight" type="button">下载检查报告</button><button class="button small primary" data-close-dialog="preflightDialog" type="button">完成</button></div></div>
+  </dialog>
+
+  <dialog id="quantDialog" class="science-dialog" aria-labelledby="quantTitle">
+    <div class="dialog-head"><div><h2 id="quantTitle">WB 灰度定量</h2><p>仅使用 8-bit 单通道原始 TIFF；先确认样本映射和 ROI，再从原始像素重算。</p></div><button class="icon-button" data-close-dialog="quantDialog" type="button" aria-label="关闭">✕</button></div>
+    <div class="science-body">
+      <div class="science-toolbar">
+        <label>当前蛋白<select id="quantRow"></select></label>
+        <label>内参<select id="quantLoading"></select></label>
+        <label>控制组<select id="quantControlGroup"></select></label>
+        <label>条带极性<select id="quantPolarity"><option value="dark">暗带 / 亮背景</option><option value="bright">亮带 / 暗背景</option></select></label>
+        <label>膜编号<input id="quantMembrane" type="text" maxlength="40" placeholder="例如 membrane-1"></label>
+        <button class="button small" id="initializeRois" type="button">按泳道初始化 ROI</button>
+        <button class="button small primary" id="calculateQuant" type="button">确认映射并计算</button>
+      </div>
+      <div class="quant-layout">
+        <div class="quant-stage"><canvas id="quantCanvas" width="900" height="500" tabindex="0" role="application" aria-label="原始 TIFF 灰度定量 ROI 编辑器"></canvas></div>
+        <div class="quant-side">
+          <strong>ROI 操作</strong>
+          <p class="field-help">黄色：条带 ROI；蓝色：同尺寸局部背景。点击 ROI 后拖动；方向键微调，Shift 为 10 px。</p>
+          <label>泳道<select id="quantLane"></select></label>
+          <label>当前框<select id="quantRoiType"><option value="band">条带 ROI</option><option value="background">背景 ROI</option></select></label>
+          <label class="toggle"><input id="quantMapLocked" type="checkbox"> 已核对泳道顺序、样本和重复</label>
+          <p id="quantStatus" class="field-help" aria-live="polite">请先初始化 ROI。</p>
+        </div>
+      </div>
+      <div><h3>样本映射</h3><div class="results-table"><table class="sample-map"><thead><tr><th>泳道</th><th>样本 ID</th><th>组别</th><th>生物学重复</th><th>技术重复</th><th>排除</th><th>说明</th></tr></thead><tbody id="sampleMapBody"></tbody></table></div></div>
+      <div id="quantResults" class="results-table"></div>
+      <canvas id="quantPlot" width="1000" height="420" aria-label="灰度定量结果图"></canvas>
+    </div>
+    <div class="dialog-foot"><p>归一化仅允许目的蛋白与内参膜编号一致；结果同时保留原始 ROI、背景扣除、QC 和 SHA-256。</p><div class="dialog-actions"><button class="button small" id="exportQuantCsv" type="button">明细 CSV</button><button class="button small" id="exportQuantXlsx" type="button">完整 XLSX</button><button class="button small primary" id="exportPrism" type="button">Prism 数据包</button></div></div>
+  </dialog>
+
+  <dialog id="panelDialog" class="science-dialog" aria-labelledby="panelTitle">
+    <div class="dialog-head"><div><h2 id="panelTitle">多面板 Figure Builder</h2><p>当前 WB 图为第一个面板，可加入 IF、IHC 或统计图；标签统一使用 Arial。</p></div><button class="icon-button" data-close-dialog="panelDialog" type="button" aria-label="关闭">✕</button></div>
+    <div class="science-body">
+      <div class="science-toolbar"><label>布局<select id="panelColumns"><option value="1">1 列</option><option value="2" selected>2 列</option><option value="3">3 列</option></select></label><label>面板间距<input id="panelGap" type="number" min="4" max="80" value="24"></label><button class="button small" id="addPanelImages" type="button">加入图片</button><button class="button small" id="addQuantPanel" type="button">加入定量图</button></div>
+      <div id="panelGrid" class="panel-grid"></div>
+    </div>
+    <div class="dialog-foot"><p>可拖动面板改变顺序；外部图片作为副本读取，不会上传。</p><div class="dialog-actions"><button class="button small" id="exportPanelSvg" type="button">SVG</button><button class="button small" id="exportPanelTiff" type="button">TIFF</button><button class="button small" id="exportPanelPdf" type="button">PDF</button><button class="button small primary" id="exportPanelPng" type="button">PNG</button></div></div>
+  </dialog>
+
+  <dialog id="historyDialog" aria-labelledby="historyTitle">
+    <div class="dialog-head"><div><h2 id="historyTitle">版本历史与模板</h2><p>版本只保存轻量设置，原始图片继续由当前项目统一保存。</p></div><button class="icon-button" data-close-dialog="historyDialog" type="button" aria-label="关闭">✕</button></div>
+    <div class="science-body"><div class="science-toolbar"><button class="button small primary" id="saveRevision" type="button">保存当前版本</button><button class="button small" id="applyTemplate" type="button">应用已保存模板</button></div><div id="historyList" class="history-list"></div></div>
+  </dialog>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="./tiff.js"></script>
+  <script src="./wb-core.js"></script>
   <script>
     (() => {
       "use strict";
@@ -612,11 +718,19 @@
       const MAX_PIXELS = 50_000_000;
       const MAX_PROJECT_FILE_BYTES = 162 * 1024 * 1024;
       const PROJECT_KIND = "blotboard-project";
-      const PROJECT_VERSION = 1;
+      const PROJECT_VERSION = 2;
       const PROJECT_DB = "blotboard-wb";
       const PROJECT_STORE = "projects";
       const AUTOSAVE_KEY = "current";
+      const TEMPLATE_KEY = "figurelab-wb-template-v2";
+      const REVISION_KEY = "figurelab-wb-revisions-v2";
+      const JOURNAL_PROFILES = {
+        preserve: { label: "保持 1 cm/泳道", maxWidthCm: 18.3, targetWidthCm: null },
+        single: { label: "单栏 8.9 cm", maxWidthCm: 8.9, targetWidthCm: 8.9 },
+        double: { label: "双栏 18.3 cm", maxWidthCm: 18.3, targetWidthCm: 18.3 },
+      };
       const newProjectId = () => typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const newRowKey = () => typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `row-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const state = {
         projectId: newProjectId(),
         modifiedAt: new Date().toISOString(),
@@ -633,6 +747,11 @@
         showLanes: false,
         showBorder: true,
         pngDpi: 300,
+        exportProfile: "preserve",
+        quant: { sampleMap: [], rois: {}, loadingKey: "", controlGroup: "Control", locked: false, results: null },
+        panels: [],
+        panelColumns: 2,
+        panelGap: 24,
         editor: null,
         renderQueued: false,
         demoLoaded: false,
@@ -648,6 +767,14 @@
       let autosaveToken = null;
       let projectDbPromise;
       let pendingMutations = 0;
+      let undoStack = [];
+      let redoStack = [];
+      let lastRuntimeSnapshot = null;
+      let lastUndoCapture = 0;
+      let restoringRuntime = false;
+      let quantView = null;
+      let quantDrag = null;
+      const decodedTiffCache = new WeakMap();
 
       const figureCanvas = $("#figureCanvas");
       const heroCanvas = $("#heroCanvas");
@@ -656,7 +783,122 @@
       const measureCanvas = document.createElement("canvas");
       const measureContext = measureCanvas.getContext("2d");
 
+      function cloneRuntimeRow(row) {
+        return {
+          ...row,
+          crop: row.crop ? { ...row.crop } : null,
+          splices: [...(row.splices || [])],
+        };
+      }
+
+      function runtimeSnapshot() {
+        return {
+          projectId: state.projectId,
+          modifiedAt: state.modifiedAt,
+          groups: state.groups.map((group) => ({ ...group })),
+          laneLabels: [...state.laneLabels],
+          rows: state.rows.map(cloneRuntimeRow),
+          layoutMode: state.layoutMode,
+          footerLabel: state.footerLabel,
+          laneWidth: state.laneWidth,
+          rowHeight: state.rowHeight,
+          rowGap: state.rowGap,
+          labelSize: state.labelSize,
+          showMw: state.showMw,
+          showLanes: state.showLanes,
+          showBorder: state.showBorder,
+          pngDpi: state.pngDpi,
+          exportProfile: state.exportProfile,
+          quant: JSON.parse(JSON.stringify(state.quant)),
+          panels: state.panels.map((panel) => ({ ...panel })),
+          panelColumns: state.panelColumns,
+          panelGap: state.panelGap,
+          demoLoaded: state.demoLoaded,
+        };
+      }
+
+      function syncWorkspaceFromState() {
+        $("#groupInput").value = groupsToText(state.groups);
+        $("#laneLabelInput").value = laneLabelsToText(state.laneLabels);
+        syncLayoutControls();
+        renderGroupSummary();
+        renderRows();
+        requestRender();
+        syncHistoryButtons();
+      }
+
+      function applyRuntimeSnapshot(snapshot) {
+        restoringRuntime = true;
+        Object.assign(state, {
+          projectId: snapshot.projectId,
+          modifiedAt: new Date().toISOString(),
+          groups: snapshot.groups.map((group) => ({ ...group })),
+          laneLabels: [...snapshot.laneLabels],
+          rows: snapshot.rows.map(cloneRuntimeRow),
+          layoutMode: snapshot.layoutMode,
+          footerLabel: snapshot.footerLabel,
+          laneWidth: snapshot.laneWidth,
+          rowHeight: snapshot.rowHeight,
+          rowGap: snapshot.rowGap,
+          labelSize: snapshot.labelSize,
+          showMw: snapshot.showMw,
+          showLanes: snapshot.showLanes,
+          showBorder: snapshot.showBorder,
+          pngDpi: snapshot.pngDpi,
+          exportProfile: snapshot.exportProfile || "preserve",
+          quant: JSON.parse(JSON.stringify(snapshot.quant || { sampleMap: [], rois: {}, loadingKey: "", controlGroup: "Control", locked: false, results: null })),
+          panels: snapshot.panels?.map((panel) => ({ ...panel })) || [],
+          panelColumns: snapshot.panelColumns || 2,
+          panelGap: snapshot.panelGap ?? 24,
+          demoLoaded: snapshot.demoLoaded,
+        });
+        syncWorkspaceFromState();
+        restoringRuntime = false;
+        lastRuntimeSnapshot = runtimeSnapshot();
+        state.dirty = true;
+        autosaveRevision += 1;
+        scheduleAutosave();
+      }
+
+      function syncHistoryButtons() {
+        if ($("#undoAction")) $("#undoAction").disabled = !undoStack.length;
+        if ($("#redoAction")) $("#redoAction").disabled = !redoStack.length;
+      }
+
+      function resetUndoBaseline() {
+        undoStack = [];
+        redoStack = [];
+        lastRuntimeSnapshot = runtimeSnapshot();
+        lastUndoCapture = 0;
+        syncHistoryButtons();
+      }
+
+      function undo() {
+        if (!undoStack.length || pendingMutations) return;
+        redoStack.push(runtimeSnapshot());
+        applyRuntimeSnapshot(undoStack.pop());
+        toast("已撤销上一步");
+      }
+
+      function redo() {
+        if (!redoStack.length || pendingMutations) return;
+        undoStack.push(runtimeSnapshot());
+        applyRuntimeSnapshot(redoStack.pop());
+        toast("已重做");
+      }
+
       function markDirty(touchModified = true) {
+        if (!restoringRuntime && lastRuntimeSnapshot) {
+          const now = Date.now();
+          if (now - lastUndoCapture > 450 || !undoStack.length) {
+            undoStack.push(lastRuntimeSnapshot);
+            if (undoStack.length > 30) undoStack.shift();
+          }
+          lastUndoCapture = now;
+          redoStack = [];
+          lastRuntimeSnapshot = runtimeSnapshot();
+          syncHistoryButtons();
+        }
         state.dirty = true;
         if (touchModified) state.modifiedAt = new Date().toISOString();
         autosaveRevision += 1;
@@ -688,6 +930,13 @@
         while (fontSize > 12 && measuredWidth(output, fontSize, weight) > maxWidth) fontSize -= 1;
         while (output.length > 2 && measuredWidth(output, fontSize, weight) > maxWidth) output = output.slice(0, -2) + "…";
         return { text: output, size: fontSize };
+      }
+
+      function fullLabelAngle(text, slotWidth, size, weight = 700) {
+        const width = measuredWidth(text, size, weight);
+        const available = Math.max(1, slotWidth - 12);
+        if (width <= available) return 0;
+        return Math.max(Math.PI / 4, Math.acos(Math.min(1, available / Math.max(1, width))));
       }
 
       function toast(message) {
@@ -777,6 +1026,9 @@
         $("#showLanes").checked = state.showLanes;
         $("#showBorder").checked = state.showBorder;
         $("#pngDpi").value = String(state.pngDpi);
+        $("#journalProfile").value = state.exportProfile || "preserve";
+        $("#panelColumns").value = String(state.panelColumns || 2);
+        $("#panelGap").value = String(state.panelGap ?? 24);
         syncLaneToggleAvailability();
       }
 
@@ -801,6 +1053,12 @@
         });
         if (groups.reduce((sum, group) => sum + group.count, 0) > 24) throw new Error("总样本数最多为 24");
         return groups;
+      }
+
+      function parseSplices(value) {
+        const boundaries = String(value || "").split(/[，,;；\s]+/).map((item) => item.trim()).filter(Boolean).map(Number);
+        if (boundaries.some((value) => !Number.isInteger(value) || value < 1 || value >= totalSamples())) throw new Error(`拼接边界必须是 1–${Math.max(1, totalSamples() - 1)} 之间的泳道编号`);
+        return [...new Set(boundaries)].sort((left, right) => left - right);
       }
 
       function groupsToText(groups) {
@@ -890,8 +1148,13 @@
         }
         const row = {
           id: ++idCounter,
+          rowKey: newRowKey(),
           name: file.name.replace(/\.[^.]+$/, "") || `Protein ${idCounter}`,
           mw: "",
+          role: "target",
+          membraneId: "",
+          nonAdjacent: false,
+          splices: [],
           sourceFile: file,
           sourceName: file.name,
           sourceType: file.type || (isTiff ? "image/tiff" : "application/octet-stream"),
@@ -912,7 +1175,7 @@
       }
 
       function blankRow() {
-        return { id: ++idCounter, name: `Protein ${idCounter}`, mw: "", sourceFile: null, sourceName: "", sourceType: "", sourceBytes: 0, sourceLastModified: 0, sourceSha256: "", src: "", image: null, crop: null, brightness: 100, contrast: 100, invert: false, bytes: 0, objectUrl: null };
+        return { id: ++idCounter, rowKey: newRowKey(), name: `Protein ${idCounter}`, mw: "", role: "target", membraneId: "", nonAdjacent: false, splices: [], sourceFile: null, sourceName: "", sourceType: "", sourceBytes: 0, sourceLastModified: 0, sourceSha256: "", src: "", image: null, crop: null, brightness: 100, contrast: 100, invert: false, bytes: 0, objectUrl: null };
       }
 
       function demoStrip(intensities, seed) {
@@ -968,6 +1231,11 @@
         state.showLanes = false;
         state.showBorder = true;
         state.pngDpi = 300;
+        state.exportProfile = "preserve";
+        state.quant = { sampleMap: [], rois: {}, loadingKey: "", controlGroup: "Control", locked: false, results: null };
+        state.panels = [];
+        state.panelColumns = 2;
+        state.panelGap = 24;
         state.editor = null;
         state.demoLoaded = false;
       }
@@ -991,7 +1259,7 @@
           const sourceName = `${name.toLowerCase().replace(/\s+/g, "-")}-example.png`;
           const sourceBlob = dataUrlToBlob(src);
           const sourceFile = new File([sourceBlob], sourceName, { type: "image/png", lastModified: 0 });
-          const row = { id: ++idCounter, name, mw, sourceFile, sourceName, sourceType: "image/png", sourceBytes: sourceFile.size, sourceLastModified: 0, sourceSha256: await sha256Blob(sourceFile), src, image, crop: null, brightness: 100, contrast: 110, invert: false, bytes: sourceFile.size, objectUrl: null };
+          const row = { id: ++idCounter, rowKey: newRowKey(), name, mw, role: name === "Protein B" ? "loading" : "target", membraneId: "example-1", nonAdjacent: false, splices: [], sourceFile, sourceName, sourceType: "image/png", sourceBytes: sourceFile.size, sourceLastModified: 0, sourceSha256: await sha256Blob(sourceFile), src, image, crop: null, brightness: 100, contrast: 110, invert: false, bytes: sourceFile.size, objectUrl: null };
           row.crop = maximumAspectCrop(row);
           return row;
         }));
@@ -1026,7 +1294,12 @@
           || !state.showMw
           || state.showLanes
           || !state.showBorder
-          || state.pngDpi !== 300;
+          || state.pngDpi !== 300
+          || state.exportProfile !== "preserve"
+          || Object.keys(state.quant.rois || {}).length > 0
+          || state.panels.length > 0
+          || state.panelColumns !== 2
+          || state.panelGap !== 24;
       }
 
       function newProject() {
@@ -1068,6 +1341,18 @@
         state.rows.forEach((row, index) => {
           const card = document.createElement("div");
           card.className = "protein-row";
+          card.dataset.rowIndex = index;
+          card.addEventListener("dragover", (event) => event.preventDefault());
+          card.addEventListener("drop", (event) => {
+            event.preventDefault();
+            const from = Number(event.dataTransfer.getData("text/plain"));
+            if (!Number.isInteger(from) || from === index || from < 0 || from >= state.rows.length) return;
+            const [moved] = state.rows.splice(from, 1);
+            state.rows.splice(index, 0, moved);
+            markDirty();
+            renderRows();
+            requestRender();
+          });
 
           const top = document.createElement("div");
           top.className = "protein-row-top";
@@ -1096,8 +1381,59 @@
           mw.addEventListener("input", () => { row.mw = mw.value; state.demoLoaded = false; markDirty(); requestRender(); });
           top.append(thumb, name, mw);
 
+          const science = document.createElement("div");
+          science.className = "row-science";
+          const roleLabel = document.createElement("label");
+          roleLabel.textContent = "定量角色";
+          const role = document.createElement("select");
+          role.innerHTML = '<option value="target">目的蛋白</option><option value="loading">内参</option><option value="other">其他</option>';
+          role.value = row.role || "target";
+          role.addEventListener("change", () => {
+            row.role = role.value;
+            if (row.role === "loading") state.quant.loadingKey = row.rowKey;
+            else if (state.quant.loadingKey === row.rowKey) state.quant.loadingKey = state.rows.find((item) => item.role === "loading" && item.rowKey !== row.rowKey)?.rowKey || "";
+            state.quant.results = null;
+            markDirty();
+          });
+          roleLabel.append(role);
+          const membraneLabel = document.createElement("label");
+          membraneLabel.textContent = "膜编号";
+          const membrane = document.createElement("input");
+          membrane.type = "text";
+          membrane.maxLength = 40;
+          membrane.placeholder = "例如 membrane-1";
+          membrane.value = row.membraneId || "";
+          membrane.addEventListener("input", () => { row.membraneId = membrane.value.trim(); state.quant.results = null; markDirty(); });
+          membraneLabel.append(membrane);
+          const spliceLabel = document.createElement("label");
+          spliceLabel.className = "wide";
+          spliceLabel.textContent = "非相邻泳道拼接边界（如 2, 4 表示第 2/3、4/5 道之间）";
+          const splice = document.createElement("input");
+          splice.type = "text";
+          splice.placeholder = "无拼接时留空";
+          splice.value = (row.splices || []).join(", ");
+          splice.addEventListener("change", () => {
+            try {
+              row.splices = parseSplices(splice.value);
+              row.nonAdjacent = row.splices.length > 0;
+              splice.value = row.splices.join(", ");
+              markDirty();
+              requestRender();
+            } catch (error) { toast(error.message); splice.value = (row.splices || []).join(", "); }
+          });
+          spliceLabel.append(splice);
+          science.append(roleLabel, membraneLabel, spliceLabel);
+
           const actions = document.createElement("div");
           actions.className = "row-actions";
+          const drag = makeButton("⋮⋮", "icon-button drag-handle", () => {}, "拖动调整顺序");
+          drag.draggable = true;
+          drag.addEventListener("dragstart", (event) => {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", String(index));
+            card.classList.add("is-dragging");
+          });
+          drag.addEventListener("dragend", () => card.classList.remove("is-dragging"));
           const upload = makeButton(row.image ? "替换" : "上传", "text-button", () => chooseReplacement(row.id));
           const edit = makeButton("裁剪/调图", "text-button", () => openEditor(row.id));
           edit.disabled = !row.image;
@@ -1106,8 +1442,8 @@
           const down = makeButton("↓", "icon-button", () => moveRow(index, 1), "下移");
           down.disabled = index === state.rows.length - 1;
           const remove = makeButton("删除", "text-button danger", () => removeRow(row.id));
-          actions.append(upload, edit, up, down, remove);
-          card.append(top, actions);
+          actions.append(drag, upload, edit, up, down, remove);
+          card.append(top, science, actions);
           list.append(card);
         });
         $("#heroRows").textContent = `${state.rows.length} 个蛋白`;
@@ -1126,8 +1462,10 @@
       function removeRow(id) {
         const row = state.rows.find((item) => item.id === id);
         if (!row || !confirm(`删除“${row.name || "未命名蛋白"}”这一行？`)) return;
-        if (row.objectUrl) URL.revokeObjectURL(row.objectUrl);
         state.rows = state.rows.filter((row) => row.id !== id);
+        delete state.quant.rois[row.rowKey];
+        if (state.quant.loadingKey === row.rowKey) state.quant.loadingKey = "";
+        state.quant.results = null;
         state.demoLoaded = false;
         markDirty();
         renderRows();
@@ -1149,11 +1487,19 @@
               URL.revokeObjectURL(replacement.objectUrl);
               return;
             }
-            if (state.rows[index].objectUrl) URL.revokeObjectURL(state.rows[index].objectUrl);
+            const previous = state.rows[index];
             replacement.id = id;
-            replacement.name = state.rows[index].name || replacement.name;
-            replacement.mw = state.rows[index].mw;
+            replacement.rowKey = previous.rowKey;
+            replacement.name = previous.name || replacement.name;
+            replacement.mw = previous.mw;
+            replacement.role = previous.role;
+            replacement.membraneId = previous.membraneId;
+            replacement.nonAdjacent = previous.nonAdjacent;
+            replacement.splices = [...(previous.splices || [])];
             state.rows[index] = replacement;
+            delete state.quant.rois[replacement.rowKey];
+            state.quant.results = null;
+            state.quant.locked = false;
             state.demoLoaded = false;
             markDirty();
             renderRows();
@@ -1222,14 +1568,16 @@
           Math.acos(Math.min(1, Math.max(1, state.laneWidth - 4) / Math.max(1, longestLaneLabel))),
           Math.asin(Math.min(1, (state.labelSize + 4) / state.laneWidth))
         ) : 0;
-        const top = compact ? Math.max(72, Math.ceil(longestLaneLabel * Math.sin(labelAngle) + state.labelSize + 18)) : 82;
+        const groupAngles = compact ? [] : state.groups.map((group) => fullLabelAngle(group.name, group.count * state.rowHeight, state.labelSize));
+        const groupTop = state.groups.reduce((maximum, group, index) => Math.max(maximum, measuredWidth(group.name, state.labelSize) * Math.sin(groupAngles[index] || 0)), 0);
+        const top = compact ? Math.max(72, Math.ceil(longestLaneLabel * Math.sin(labelAngle) + state.labelSize + 18)) : Math.max(82, Math.ceil(groupTop + state.labelSize + 42));
         const rowCount = Math.max(1, state.rows.length);
         const contentBottom = top + rowCount * state.rowHeight + Math.max(0, rowCount - 1) * state.rowGap;
         const footerLineY = contentBottom + 14;
         const footerLabelY = footerLineY + 23;
         const bottom = compact && state.footerLabel.trim() ? 86 : (state.showLanes ? 55 : 28);
         const height = contentBottom + bottom;
-        return { width, height, left, right, top, bottom, bandWidth, contentBottom, footerLineY, footerLabelY, labelAngle };
+        return { width, height, left, right, top, bottom, bandWidth, contentBottom, footerLineY, footerLabelY, labelAngle, groupAngles };
       }
 
       function drawContainedImage(ctx, row, x, y, width, height) {
@@ -1279,17 +1627,27 @@
         } else {
           let laneOffset = 0;
           ctx.font = `700 ${state.labelSize}px Arial, "Microsoft YaHei", sans-serif`;
-          state.groups.forEach((group) => {
+          state.groups.forEach((group, groupIndex) => {
             const start = g.left + laneOffset * laneWidth;
             const end = start + group.count * laneWidth;
-            const label = fittedLabel(group.name, Math.max(18, end - start - 18), state.labelSize);
-            ctx.font = `700 ${label.size}px Arial, "Microsoft YaHei", sans-serif`;
-            ctx.fillText(label.text, (start + end) / 2, 23);
+            const angle = g.groupAngles[groupIndex] || 0;
+            ctx.font = `700 ${state.labelSize}px Arial, "Microsoft YaHei", sans-serif`;
+            if (angle) {
+              ctx.save();
+              ctx.translate(start + Math.min(8, (end - start) * .12), g.top - 42);
+              ctx.rotate(-angle);
+              ctx.textAlign = "left";
+              ctx.fillText(group.name, 0, 0);
+              ctx.restore();
+            } else {
+              ctx.textAlign = "center";
+              ctx.fillText(group.name, (start + end) / 2, g.top - 59);
+            }
             ctx.strokeStyle = "#172033";
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.moveTo(start + Math.min(9, (end - start) * .08), 49);
-            ctx.lineTo(end - Math.min(9, (end - start) * .08), 49);
+            ctx.moveTo(start + Math.min(9, (end - start) * .08), g.top - 33);
+            ctx.lineTo(end - Math.min(9, (end - start) * .08), g.top - 33);
             ctx.stroke();
             laneOffset += group.count;
           });
@@ -1332,6 +1690,14 @@
             ctx.lineWidth = 1;
             ctx.strokeRect(g.left + .5, y + .5, g.bandWidth - 1, state.rowHeight - 1);
           }
+          (row.splices || []).forEach((boundary) => {
+            ctx.strokeStyle = "#111827";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(g.left + boundary * laneWidth, y);
+            ctx.lineTo(g.left + boundary * laneWidth, y + state.rowHeight);
+            ctx.stroke();
+          });
         });
 
         if (compact && state.footerLabel.trim()) {
@@ -1407,11 +1773,50 @@
           toast(`“${missing.name || "未命名蛋白"}”尚未上传条带图`);
           return false;
         }
+        const report = runPreflight();
+        if (report.errors.length) {
+          toast(`投稿检查发现 ${report.errors.length} 项必须处理的问题`);
+          openPreflight();
+          return false;
+        }
         return true;
       }
 
       function renderScale(dpi) {
         return dpi / 2.54 / state.rowHeight;
+      }
+
+      function profileRenderScale(dpi) {
+        const profile = JOURNAL_PROFILES[state.exportProfile] || JOURNAL_PROFILES.preserve;
+        if (!profile.targetWidthCm) return renderScale(dpi);
+        return profile.targetWidthCm / 2.54 * dpi / geometry().width;
+      }
+
+      function buildFigureCanvas(dpi = state.pngDpi) {
+        const canvas = document.createElement("canvas");
+        paintFigure(canvas, profileRenderScale(dpi));
+        return canvas;
+      }
+
+      function canvasBlob(canvas, type, quality) {
+        return new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error(`浏览器无法生成 ${type}`)), type, quality));
+      }
+
+      async function buildFigurePngBlob(dpi = state.pngDpi) {
+        const canvas = buildFigureCanvas(dpi);
+        return withPngDpi(await canvasBlob(canvas, "image/png"), dpi);
+      }
+
+      async function buildFigureTiffBlob(dpi = state.pngDpi) {
+        const canvas = buildFigureCanvas(dpi);
+        const imageData = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+        return new Blob([window.WBCore.encodeTiffRgba(canvas.width, canvas.height, imageData.data, dpi)], { type: "image/tiff" });
+      }
+
+      async function buildFigurePdfBlob(dpi = state.pngDpi) {
+        const canvas = buildFigureCanvas(dpi);
+        const jpeg = new Uint8Array(await (await canvasBlob(canvas, "image/jpeg", .96)).arrayBuffer());
+        return new Blob([window.WBCore.pdfFromJpegs([{ jpeg, width: canvas.width, height: canvas.height, dpi }], { title: artifactStem(), subject: "Western blot figure" })], { type: "application/pdf" });
       }
 
       let pngCrcTable;
@@ -1474,16 +1879,27 @@
         const dpi = Number($("#pngDpi").value) === 600 ? 600 : 300;
         state.pngDpi = dpi;
         try {
-          const canvas = document.createElement("canvas");
-          paintFigure(canvas, renderScale(dpi));
-          const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-          if (!blob) throw new Error("浏览器无法生成这张 PNG");
-          const physicalPng = await withPngDpi(blob, dpi);
-          downloadBlob(physicalPng, fileName("png", `${dpi}dpi`));
+          downloadBlob(await buildFigurePngBlob(dpi), fileName("png", `${dpi}dpi`));
           toast(`${dpi} DPI PNG 已按厘米尺寸导出`);
         } catch (error) {
           toast(`PNG 生成失败：${error.message}`);
         }
+      }
+
+      async function exportTiff() {
+        if (!ensureExportable()) return;
+        try {
+          downloadBlob(await buildFigureTiffBlob(state.pngDpi), fileName("tiff", `${state.pngDpi}dpi`));
+          toast("TIFF 已按所选物理尺寸导出");
+        } catch (error) { toast(`TIFF 生成失败：${error.message}`); }
+      }
+
+      async function exportPdf() {
+        if (!ensureExportable()) return;
+        try {
+          downloadBlob(await buildFigurePdfBlob(state.pngDpi), fileName("pdf", `${state.pngDpi}dpi`));
+          toast("PDF 已导出");
+        } catch (error) { toast(`PDF 生成失败：${error.message}`); }
       }
 
       function xml(value) {
@@ -1502,13 +1918,13 @@
         return canvas.toDataURL("image/png");
       }
 
-      function exportSvg() {
-        if (!ensureExportable()) return;
+      function buildSvgText() {
         const g = geometry();
         const samples = Math.max(1, totalSamples());
         const laneWidth = g.bandWidth / samples;
-        const widthCm = g.width / state.rowHeight;
-        const heightCm = g.height / state.rowHeight;
+        const profile = JOURNAL_PROFILES[state.exportProfile] || JOURNAL_PROFILES.preserve;
+        const widthCm = profile.targetWidthCm || g.width / state.rowHeight;
+        const heightCm = widthCm * g.height / g.width;
         const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${widthCm.toFixed(4)}cm" height="${heightCm.toFixed(4)}cm" viewBox="0 0 ${g.width} ${g.height}">`, `<rect width="100%" height="100%" fill="white"/>`];
         const compact = state.layoutMode === "compact";
         if (compact) {
@@ -1519,12 +1935,18 @@
           });
         } else {
           let laneOffset = 0;
-          state.groups.forEach((group) => {
+          state.groups.forEach((group, groupIndex) => {
             const start = g.left + laneOffset * laneWidth;
             const end = start + group.count * laneWidth;
-            const label = fittedLabel(group.name, Math.max(18, end - start - 18), state.labelSize);
-            parts.push(`<text x="${(start + end) / 2}" y="29" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${label.size}" font-weight="700" fill="#111827">${xml(label.text)}</text>`);
-            parts.push(`<line x1="${start + Math.min(9, (end - start) * .08)}" y1="49" x2="${end - Math.min(9, (end - start) * .08)}" y2="49" stroke="#172033" stroke-width="2"/>`);
+            const angle = g.groupAngles[groupIndex] || 0;
+            if (angle) {
+              const x = start + Math.min(8, (end - start) * .12);
+              const y = g.top - 42;
+              parts.push(`<text x="${x}" y="${y}" dominant-baseline="middle" text-anchor="start" transform="rotate(${-angle * 180 / Math.PI} ${x} ${y})" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${state.labelSize}" font-weight="700" fill="#111827">${xml(group.name)}</text>`);
+            } else {
+              parts.push(`<text x="${(start + end) / 2}" y="${g.top - 59}" dominant-baseline="middle" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${state.labelSize}" font-weight="700" fill="#111827">${xml(group.name)}</text>`);
+            }
+            parts.push(`<line x1="${start + Math.min(9, (end - start) * .08)}" y1="${g.top - 33}" x2="${end - Math.min(9, (end - start) * .08)}" y2="${g.top - 33}" stroke="#172033" stroke-width="2"/>`);
             laneOffset += group.count;
           });
         }
@@ -1544,6 +1966,7 @@
             parts.push(`<rect x="${g.left}" y="${y}" width="${g.bandWidth}" height="${state.rowHeight}" fill="#f0f3f7"/>`);
           }
           if (state.showBorder) parts.push(`<rect x="${g.left + .5}" y="${y + .5}" width="${g.bandWidth - 1}" height="${state.rowHeight - 1}" fill="none" stroke="${compact ? "#374151" : "#9ca8b9"}"/>`);
+          (row.splices || []).forEach((boundary) => parts.push(`<line x1="${g.left + boundary * laneWidth}" y1="${y}" x2="${g.left + boundary * laneWidth}" y2="${y + state.rowHeight}" stroke="#111827" stroke-width="2"/>`));
         });
         if (compact && state.footerLabel.trim()) {
           const footer = fittedLabel(state.footerLabel.trim(), g.bandWidth, state.labelSize, 700);
@@ -1553,7 +1976,12 @@
           for (let lane = 0; lane < samples; lane += 1) parts.push(`<text x="${g.left + (lane + .5) * laneWidth}" y="${g.height - 15}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#657187">${lane + 1}</text>`);
         }
         parts.push("</svg>");
-        downloadBlob(new Blob([parts.join("")], { type: "image/svg+xml;charset=utf-8" }), fileName("svg"));
+        return parts.join("");
+      }
+
+      function exportSvg() {
+        if (!ensureExportable()) return;
+        downloadBlob(new Blob([buildSvgText()], { type: "image/svg+xml;charset=utf-8" }), fileName("svg"));
         toast("可编辑 SVG 已按厘米尺寸导出");
       }
 
@@ -1570,6 +1998,988 @@
         } catch {
           toast("浏览器阻止了复制，请使用 PNG 导出");
         }
+      }
+
+      function currentFigureMetrics() {
+        const g = geometry();
+        const profile = JOURNAL_PROFILES[state.exportProfile] || JOURNAL_PROFILES.preserve;
+        const naturalWidthCm = g.width / state.rowHeight;
+        const figureWidthCm = profile.targetWidthCm || naturalWidthCm;
+        const physicalScale = figureWidthCm / naturalWidthCm;
+        return {
+          figureWidthCm,
+          figureHeightCm: figureWidthCm * g.height / g.width,
+          labelSizePt: state.labelSize / state.rowHeight / 2.54 * 72 * physicalScale,
+          maxWidthCm: profile.maxWidthCm,
+        };
+      }
+
+      function runPreflight() {
+        const metrics = currentFigureMetrics();
+        const clippingByRow = new Map();
+        const mergeClipping = (key, measurement) => {
+          if (!key || !measurement) return;
+          const current = clippingByRow.get(key) || { signal: 0, background: 0 };
+          current.signal = Math.max(current.signal, measurement.signalClippedFraction || 0);
+          current.background = Math.max(current.background, measurement.backgroundClippedFraction || 0);
+          clippingByRow.set(key, current);
+        };
+        (state.quant.results?.normalized || []).forEach((result) => {
+          mergeClipping(result.targetKey, result.targetMeasurement);
+          mergeClipping(state.quant.results?.loadingKey, result.loadingMeasurement);
+        });
+        return window.WBCore.runIntegrityChecks({
+          laneCount: totalSamples(),
+          ...metrics,
+          rows: state.rows.map((row) => ({
+            name: row.name,
+            mw: row.mw,
+            hasSource: Boolean(row.sourceFile),
+            sha256: row.sourceSha256,
+            brightness: row.brightness,
+            contrast: row.contrast,
+            invert: row.invert,
+            role: row.role,
+            membraneId: row.membraneId,
+            nonAdjacent: row.nonAdjacent,
+            splices: row.splices,
+            signalClippedFraction: clippingByRow.get(row.rowKey)?.signal || 0,
+            backgroundClippedFraction: clippingByRow.get(row.rowKey)?.background || 0,
+          })),
+        });
+      }
+
+      function checkSection(title, className, items, fallback) {
+        const section = document.createElement("section");
+        section.className = `check-section ${className}`;
+        const heading = document.createElement("h3");
+        heading.textContent = `${title} · ${items.length}`;
+        const list = document.createElement("ul");
+        (items.length ? items : [fallback]).forEach((item) => {
+          const li = document.createElement("li");
+          li.textContent = typeof item === "string" ? item : item.message;
+          list.append(li);
+        });
+        section.append(heading, list);
+        return section;
+      }
+
+      function openPreflight() {
+        const report = runPreflight();
+        const container = $("#preflightResults");
+        container.replaceChildren(
+          checkSection("必须处理", report.errors.length ? "error" : "pass", report.errors, "没有阻止导出的错误。"),
+          checkSection("需要确认", report.warnings.length ? "warning" : "pass", report.warnings, "没有常规投稿警告。"),
+          checkSection("已通过", "pass", report.passes, "基础检查已完成。"),
+        );
+        $("#preflightDialog").showModal();
+        return report;
+      }
+
+      function downloadPreflightReport() {
+        const report = runPreflight();
+        const payload = {
+          schema_version: PROJECT_VERSION,
+          engine_version: window.WBCore.ENGINE_VERSION,
+          project_id: state.projectId,
+          checked_at_utc: new Date().toISOString(),
+          profile: state.exportProfile,
+          metrics: currentFigureMetrics(),
+          ...report,
+          note: "未发现端点饱和不等于信号处于线性检测范围。",
+        };
+        downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" }), fileName("json", "preflight"));
+      }
+
+      function safeFilePart(value) {
+        return String(value || "file").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "file";
+      }
+
+      async function buildSourceDataPdf() {
+        const pages = [];
+        for (const [index, row] of state.rows.entries()) {
+          const canvas = document.createElement("canvas");
+          canvas.width = 1654;
+          canvas.height = 2339;
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = "#111827";
+          ctx.font = "700 42px Arial, sans-serif";
+          ctx.fillText(`Source Data · ${index + 1}. ${row.name || "Untitled"}`, 90, 100);
+          ctx.font = "26px Arial, sans-serif";
+          const details = [
+            `原始文件：${row.sourceName || ""}`,
+            `分子量：${row.mw || "未填写"}    角色：${row.role || "target"}    膜编号：${row.membraneId || "未填写"}`,
+            `SHA-256：${row.sourceSha256 || "当前浏览器未生成"}`,
+            `原图尺寸：${row.image?.naturalWidth || 0} × ${row.image?.naturalHeight || 0} px`,
+            "下图为完整未裁剪原图；亮度、对比度和反相均未应用。",
+          ];
+          details.forEach((line, lineIndex) => ctx.fillText(line, 90, 160 + lineIndex * 42));
+          const box = { x: 90, y: 410, w: canvas.width - 180, h: canvas.height - 520 };
+          ctx.strokeStyle = "#9ca3af";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(box.x, box.y, box.w, box.h);
+          if (row.image) {
+            const scale = Math.min(box.w / row.image.naturalWidth, box.h / row.image.naturalHeight);
+            const width = row.image.naturalWidth * scale;
+            const height = row.image.naturalHeight * scale;
+            ctx.imageSmoothingEnabled = true;
+            ctx.drawImage(row.image, box.x + (box.w - width) / 2, box.y + (box.h - height) / 2, width, height);
+          }
+          ctx.fillStyle = "#4b5563";
+          ctx.font = "22px Arial, sans-serif";
+          ctx.fillText(`FigureLab WB · ${new Date().toISOString()} · project ${state.projectId}`, 90, canvas.height - 65);
+          const jpeg = new Uint8Array(await (await canvasBlob(canvas, "image/jpeg", .94)).arrayBuffer());
+          pages.push({ jpeg, width: canvas.width, height: canvas.height, dpi: 150 });
+        }
+        return new Blob([window.WBCore.pdfFromJpegs(pages, { title: `${artifactStem()} Source Data`, subject: "Full uncropped Western blot source images" })], { type: "application/pdf" });
+      }
+
+      async function sha256Bytes(data) {
+        if (!crypto.subtle) return "";
+        const value = data instanceof Uint8Array ? data : new Uint8Array(await data.arrayBuffer());
+        const digest = await crypto.subtle.digest("SHA-256", value);
+        return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      }
+
+      async function exportCompliancePackage() {
+        if (!ensureExportable()) return;
+        beginImageMutation();
+        setAutosaveStatus("正在生成投稿合规包…");
+        try {
+          const report = runPreflight();
+          const [png, tiff, pdf, sourcePdf, audit, project] = await Promise.all([
+            buildFigurePngBlob(state.pngDpi),
+            buildFigureTiffBlob(state.pngDpi),
+            buildFigurePdfBlob(state.pngDpi),
+            buildSourceDataPdf(),
+            buildAuditCsvText(),
+            portableProjectObject(),
+          ]);
+          const manifest = {
+            schema: "figurelab-wb-compliance-package-v1",
+            project_id: state.projectId,
+            created_at_utc: new Date().toISOString(),
+            app_version: window.WBCore.ENGINE_VERSION,
+            figure: { stem: artifactStem(), dpi: state.pngDpi, profile: state.exportProfile, metrics: currentFigureMetrics() },
+            groups: state.groups,
+            lane_labels: resolvedLaneLabels(),
+            rows: state.rows.map((row, index) => ({ order: index + 1, row_key: row.rowKey, protein: row.name, molecular_weight: row.mw, role: row.role, membrane_id: row.membraneId, source_file: row.sourceName, source_sha256: row.sourceSha256, splices: row.splices || [], crop: row.crop, brightness: row.brightness, contrast: row.contrast, invert: row.invert })),
+            panels: state.panels.map((panel, index) => ({ order: index + 1, key: panel.key, type: panel.type, label: panel.label, source_file: panel.sourceFile?.name || "current WB figure" })),
+            preflight: report,
+          };
+          const entries = [
+            { name: "README.txt", data: "FigureLab WB 投稿合规包\r\n\r\noriginals/：原始上传文件（未修改）\r\nfigure/：最终 PNG、TIFF、PDF 与可编辑 SVG\r\nsource-data/：完整未裁剪原图 PDF\r\naudit/：处理记录、投稿检查和清单\r\nproject/：可重新打开的项目文件\r\n\r\n灰度定量始终从原始 TIFF 重算；未发现端点饱和不等于处于线性检测范围。\r\n" },
+            { name: `figure/${fileName("png", `${state.pngDpi}dpi`)}`, data: new Uint8Array(await png.arrayBuffer()) },
+            { name: `figure/${fileName("tiff", `${state.pngDpi}dpi`)}`, data: new Uint8Array(await tiff.arrayBuffer()) },
+            { name: `figure/${fileName("pdf", `${state.pngDpi}dpi`)}`, data: new Uint8Array(await pdf.arrayBuffer()) },
+            { name: `figure/${fileName("svg")}`, data: buildSvgText() },
+            { name: `source-data/${fileName("pdf", "full-uncropped-source-data")}`, data: new Uint8Array(await sourcePdf.arrayBuffer()) },
+            { name: "audit/processing-record.csv", data: audit },
+            { name: "audit/preflight.json", data: JSON.stringify({ ...report, metrics: currentFigureMetrics() }, null, 2) },
+            { name: "audit/manifest.json", data: JSON.stringify(manifest, null, 2) },
+            { name: `project/${fileName("wb-project", "project")}`, data: JSON.stringify(project) },
+          ];
+          for (const [index, row] of state.rows.entries()) if (row.sourceFile) entries.push({ name: `originals/${String(index + 1).padStart(2, "0")}-${safeFilePart(row.sourceName)}`, data: new Uint8Array(await row.sourceFile.arrayBuffer()) });
+          const externalPanels = state.panels.filter((panel) => panel.type !== "wb" && panel.sourceFile);
+          for (const [index, panel] of externalPanels.entries()) entries.push({ name: `panel-originals/${String(index + 1).padStart(2, "0")}-${safeFilePart(panel.sourceFile.name)}`, data: new Uint8Array(await panel.sourceFile.arrayBuffer()) });
+          if (externalPanels.length) {
+            ensurePanelState();
+            const panelCanvas = buildPanelCanvas(state.pngDpi);
+            const panelPng = await withPngDpi(await canvasBlob(panelCanvas, "image/png"), state.pngDpi);
+            const panelRgba = panelCanvas.getContext("2d").getImageData(0, 0, panelCanvas.width, panelCanvas.height).data;
+            const panelJpeg = new Uint8Array(await (await canvasBlob(panelCanvas, "image/jpeg", .96)).arrayBuffer());
+            entries.push({ name: "figure/multi-panel.png", data: new Uint8Array(await panelPng.arrayBuffer()) });
+            entries.push({ name: "figure/multi-panel.tiff", data: window.WBCore.encodeTiffRgba(panelCanvas.width, panelCanvas.height, panelRgba, state.pngDpi) });
+            entries.push({ name: "figure/multi-panel.pdf", data: window.WBCore.pdfFromJpegs([{ jpeg: panelJpeg, width: panelCanvas.width, height: panelCanvas.height, dpi: state.pngDpi }], { title: `${artifactStem()} multi-panel` }) });
+          }
+          if (state.quant.results) entries.push(...buildQuantPackageEntries("quantification/"));
+          const checksums = [];
+          for (const entry of entries) checksums.push(`${await sha256Bytes(window.WBCore.bytes(entry.data))}  ${entry.name}`);
+          entries.push({ name: "checksums.sha256", data: checksums.join("\n") + "\n" });
+          downloadBlob(new Blob([window.WBCore.zipStore(entries)], { type: "application/zip" }), fileName("zip", "submission-package"));
+          toast("投稿合规包已生成，包含原图、Source Data、成图、项目和审计记录");
+          setAutosaveStatus(state.dirty ? "待保存" : "已保存到本机");
+        } catch (error) {
+          setAutosaveStatus("合规包生成失败");
+          toast(`合规包生成失败：${error.message}`);
+        } finally { endImageMutation(); }
+      }
+
+      async function decodeQuantRow(row) {
+        if (!row?.sourceFile || !/\.tiff?$/i.test(row.sourceName || row.sourceFile.name)) throw new Error(`${row?.name || "该条带"} 不是可定量的原始 TIFF`);
+        if (decodedTiffCache.has(row.sourceFile)) return decodedTiffCache.get(row.sourceFile);
+        const decoded = window.WBTiff.decode(await row.sourceFile.arrayBuffer(), MAX_PIXELS);
+        decodedTiffCache.set(row.sourceFile, decoded);
+        return decoded;
+      }
+
+      function defaultSampleMap() {
+        let lane = 0;
+        return state.groups.flatMap((group) => Array.from({ length: group.count }, (_, index) => {
+          const item = {
+            lane: lane + 1,
+            sampleId: resolvedLaneLabels()[lane] || `${group.name}-${index + 1}`,
+            group: group.name,
+            biologicalReplicate: String(index + 1),
+            technicalReplicate: "",
+            excluded: false,
+            exclusionNote: "",
+          };
+          lane += 1;
+          return item;
+        }));
+      }
+
+      function ensureSampleMap() {
+        if (state.quant.sampleMap.length !== totalSamples()) {
+          state.quant.sampleMap = defaultSampleMap();
+          state.quant.locked = false;
+          state.quant.results = null;
+        }
+        return state.quant.sampleMap;
+      }
+
+      function sampleMapIssue() {
+        const allowedGroups = new Set(state.groups.map((group) => group.name));
+        for (const sample of ensureSampleMap()) {
+          if (!String(sample.sampleId || "").trim()) return `第 ${sample.lane} 道缺少样本 ID`;
+          if (!allowedGroups.has(sample.group)) return `第 ${sample.lane} 道的组别无效`;
+          if (!String(sample.biologicalReplicate || "").trim()) return `第 ${sample.lane} 道缺少生物学重复编号`;
+        }
+        if (!state.quant.sampleMap.some((sample) => !sample.excluded && sample.group === state.quant.controlGroup)) return `控制组 ${state.quant.controlGroup || "未指定"} 没有可用样本`;
+        return "";
+      }
+
+      function renderSampleMap() {
+        const body = $("#sampleMapBody");
+        body.replaceChildren();
+        const groupOptions = state.groups.map((group) => `<option value="${xml(group.name)}">${xml(group.name)}</option>`).join("");
+        ensureSampleMap().forEach((sample, index) => {
+          const row = document.createElement("tr");
+          row.innerHTML = `<td>${index + 1}</td><td><input data-map="sampleId" value="${xml(sample.sampleId)}"></td><td><select data-map="group">${groupOptions}</select></td><td><input data-map="biologicalReplicate" value="${xml(sample.biologicalReplicate)}"></td><td><input data-map="technicalReplicate" value="${xml(sample.technicalReplicate)}"></td><td><input data-map="excluded" type="checkbox" ${sample.excluded ? "checked" : ""} aria-label="排除第 ${index + 1} 道"></td><td><input data-map="exclusionNote" value="${xml(sample.exclusionNote)}"></td>`;
+          row.querySelector('[data-map="group"]').value = sample.group;
+          row.querySelectorAll("[data-map]").forEach((input) => {
+            const update = () => {
+              const key = input.dataset.map;
+              sample[key] = input.type === "checkbox" ? input.checked : input.value.trim();
+              state.quant.locked = false;
+              state.quant.results = null;
+              $("#quantMapLocked").checked = false;
+              markDirty();
+            };
+            input.addEventListener(input.type === "checkbox" || input.tagName === "SELECT" ? "change" : "input", update);
+          });
+          body.append(row);
+        });
+      }
+
+      function quantifiableRows() {
+        return state.rows.filter((row) => row.sourceFile && /\.tiff?$/i.test(row.sourceName || row.sourceFile.name));
+      }
+
+      function syncQuantSelectors(selectedKey) {
+        const rows = quantifiableRows();
+        const selected = selectedKey || $("#quantRow").value || rows.find((row) => row.role === "target")?.rowKey || rows[0]?.rowKey || "";
+        $("#quantRow").replaceChildren(...rows.map((row) => {
+          const option = document.createElement("option");
+          option.value = row.rowKey;
+          option.textContent = `${row.name} · ${row.role === "loading" ? "内参" : "目的蛋白"}`;
+          return option;
+        }));
+        $("#quantRow").value = rows.some((row) => row.rowKey === selected) ? selected : rows[0]?.rowKey || "";
+        const loadingRows = rows.filter((row) => row.role === "loading");
+        $("#quantLoading").replaceChildren(...loadingRows.map((row) => {
+          const option = document.createElement("option");
+          option.value = row.rowKey;
+          option.textContent = row.name;
+          return option;
+        }));
+        if (!loadingRows.length) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "请先把一行设为内参";
+          $("#quantLoading").append(option);
+        }
+        const loading = loadingRows.find((row) => row.rowKey === state.quant.loadingKey) || loadingRows[0];
+        state.quant.loadingKey = loading?.rowKey || "";
+        $("#quantLoading").value = state.quant.loadingKey;
+        $("#quantControlGroup").replaceChildren(...state.groups.map((group) => {
+          const option = document.createElement("option");
+          option.value = group.name;
+          option.textContent = group.name;
+          return option;
+        }));
+        if (!state.groups.some((group) => group.name === state.quant.controlGroup)) state.quant.controlGroup = state.groups[0]?.name || "";
+        $("#quantControlGroup").value = state.quant.controlGroup;
+        $("#quantLane").replaceChildren(...Array.from({ length: totalSamples() }, (_, index) => {
+          const option = document.createElement("option");
+          option.value = String(index);
+          option.textContent = `第 ${index + 1} 道 · ${resolvedLaneLabels()[index] || ""}`;
+          return option;
+        }));
+      }
+
+      async function openQuant() {
+        const rows = quantifiableRows();
+        if (!rows.length) return toast("灰度定量需要上传 8-bit 单通道原始 TIFF；PNG/JPG 仍可用于组图");
+        ensureSampleMap();
+        syncQuantSelectors();
+        renderSampleMap();
+        $("#quantMapLocked").checked = state.quant.locked;
+        $("#quantDialog").showModal();
+        await loadQuantRow();
+        renderQuantResults();
+      }
+
+      async function loadQuantRow() {
+        const row = state.rows.find((item) => item.rowKey === $("#quantRow").value);
+        if (!row) return;
+        try {
+          const decoded = await decodeQuantRow(row);
+          const entry = state.quant.rois[row.rowKey];
+          $("#quantPolarity").value = entry?.polarity || "dark";
+          $("#quantMembrane").value = row.membraneId || "";
+          quantView = { row, decoded };
+          paintQuantCanvas();
+          $("#quantStatus").textContent = entry ? `${entry.confirmed ? "已确认" : "待确认"} · ${entry.lanes.length} 条泳道 ROI` : "请先按泳道初始化 ROI。";
+        } catch (error) { toast(error.message); }
+      }
+
+      function initializeQuantRois() {
+        const row = quantView?.row;
+        const decoded = quantView?.decoded;
+        if (!row || !decoded) return;
+        const lanes = totalSamples();
+        const crop = row.crop ? fitAspectCrop(row, row.crop) : { x: 0, y: 0, w: decoded.width, h: decoded.height };
+        const laneWidth = crop.w / lanes;
+        const boxWidth = Math.max(2, Math.round(laneWidth * .72));
+        const boxHeight = Math.max(2, Math.round(crop.h * .22));
+        const yBackground = Math.round(crop.y + crop.h * .06);
+        const yBand = Math.round(crop.y + crop.h * .62);
+        state.quant.rois[row.rowKey] = {
+          polarity: $("#quantPolarity").value === "bright" ? "bright" : "dark",
+          confirmed: false,
+          lanes: Array.from({ length: lanes }, (_, index) => {
+            const x = Math.max(0, Math.min(decoded.width - boxWidth, Math.round(crop.x + index * laneWidth + (laneWidth - boxWidth) / 2)));
+            return {
+              band: { x, y: Math.max(0, Math.min(decoded.height - boxHeight, yBand)), w: boxWidth, h: boxHeight },
+              background: { x, y: Math.max(0, Math.min(decoded.height - boxHeight, yBackground)), w: boxWidth, h: boxHeight },
+            };
+          }),
+        };
+        state.quant.results = null;
+        markDirty();
+        paintQuantCanvas();
+        $("#quantStatus").textContent = "ROI 已初始化；请逐泳道核对条带框和局部背景框。";
+      }
+
+      function paintQuantCanvas() {
+        if (!quantView) return;
+        const { row, decoded } = quantView;
+        const canvas = $("#quantCanvas");
+        const maxWidth = 1000;
+        const maxHeight = 620;
+        const scale = Math.min(maxWidth / decoded.width, maxHeight / decoded.height, 1);
+        canvas.width = Math.max(1, Math.round(decoded.width * scale));
+        canvas.height = Math.max(1, Math.round(decoded.height * scale));
+        quantView.scale = scale;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#111827";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(row.image, 0, 0, canvas.width, canvas.height);
+        const entry = state.quant.rois[row.rowKey];
+        if (!entry) return;
+        const selectedLane = Number($("#quantLane").value || 0);
+        const selectedType = $("#quantRoiType").value;
+        entry.lanes.forEach((lane, laneIndex) => ["background", "band"].forEach((type) => {
+          const roi = lane[type];
+          ctx.strokeStyle = type === "band" ? "#ffd43b" : "#35c9ff";
+          ctx.lineWidth = laneIndex === selectedLane && type === selectedType ? 4 : 2;
+          ctx.strokeRect(roi.x * scale, roi.y * scale, roi.w * scale, roi.h * scale);
+          if (type === "band") {
+            ctx.fillStyle = "rgba(0,0,0,.65)";
+            ctx.fillRect(roi.x * scale, roi.y * scale, 34, 22);
+            ctx.fillStyle = "#fff";
+            ctx.font = "700 14px Arial, sans-serif";
+            ctx.fillText(String(laneIndex + 1), roi.x * scale + 10, roi.y * scale + 16);
+          }
+        }));
+      }
+
+      function selectedQuantRoi() {
+        const entry = quantView && state.quant.rois[quantView.row.rowKey];
+        const lane = entry?.lanes[Number($("#quantLane").value || 0)];
+        return lane?.[$("#quantRoiType").value] || null;
+      }
+
+      function clampQuantRoi(roi) {
+        roi.x = Math.max(0, Math.min(quantView.decoded.width - roi.w, Math.round(roi.x)));
+        roi.y = Math.max(0, Math.min(quantView.decoded.height - roi.h, Math.round(roi.y)));
+      }
+
+      function moveQuantRoi(dx, dy) {
+        const roi = selectedQuantRoi();
+        if (!roi) return;
+        roi.x += dx;
+        roi.y += dy;
+        clampQuantRoi(roi);
+        state.quant.rois[quantView.row.rowKey].confirmed = false;
+        state.quant.results = null;
+        paintQuantCanvas();
+      }
+
+      function resizeQuantRois(delta) {
+        const entry = quantView && state.quant.rois[quantView.row.rowKey];
+        if (!entry) return;
+        const current = selectedQuantRoi();
+        const width = Math.max(2, Math.min(quantView.decoded.width, current.w + delta));
+        const height = Math.max(2, Math.min(quantView.decoded.height, current.h + delta));
+        entry.lanes.forEach((lane) => [lane.band, lane.background].forEach((roi) => {
+          const cx = roi.x + roi.w / 2;
+          const cy = roi.y + roi.h / 2;
+          roi.w = width;
+          roi.h = height;
+          roi.x = cx - width / 2;
+          roi.y = cy - height / 2;
+          clampQuantRoi(roi);
+        }));
+        entry.confirmed = false;
+        state.quant.results = null;
+        markDirty();
+        paintQuantCanvas();
+      }
+
+      async function calculateQuantification() {
+        if (!quantView) return;
+        const currentEntry = state.quant.rois[quantView.row.rowKey];
+        if (!currentEntry) return toast("请先为当前蛋白初始化 ROI");
+        currentEntry.confirmed = true;
+        currentEntry.polarity = $("#quantPolarity").value === "bright" ? "bright" : "dark";
+        state.quant.locked = $("#quantMapLocked").checked;
+        state.quant.loadingKey = $("#quantLoading").value;
+        state.quant.controlGroup = $("#quantControlGroup").value;
+        if (!state.quant.locked) return toast("请先核对样本映射，并勾选“已核对泳道顺序、样本和重复”");
+        const mappingIssue = sampleMapIssue();
+        if (mappingIssue) return toast(mappingIssue);
+        const loadingRow = state.rows.find((row) => row.rowKey === state.quant.loadingKey);
+        const targetRows = state.rows.filter((row) => row.role === "target" && quantifiableRows().includes(row));
+        const required = [...targetRows, loadingRow].filter(Boolean);
+        const missing = required.filter((row) => !state.quant.rois[row.rowKey]?.confirmed);
+        if (missing.length) {
+          markDirty();
+          return toast(`已确认当前 ROI；还需依次核对：${missing.map((row) => row.name).join("、")}`);
+        }
+        if (!loadingRow) return toast("请指定内参条带行");
+        if (loadingRow.role !== "loading") return toast("所选内参行的定量角色不是“内参”，请重新指定");
+        if (targetRows.some((row) => row.rowKey === loadingRow.rowKey)) return toast("同一条带行不能同时作为目的蛋白和内参");
+        if (!targetRows.length) return toast("请至少把一条 TIFF 行设为目的蛋白");
+        if (!loadingRow.membraneId) return toast("请为内参填写膜编号");
+        const mismatch = targetRows.find((row) => !row.membraneId || row.membraneId !== loadingRow.membraneId);
+        if (mismatch) return toast(`${mismatch.name} 与内参的膜编号不一致；跨膜结果不会自动归一化`);
+        beginImageMutation();
+        try {
+          const measure = async (row) => {
+            const decoded = await decodeQuantRow(row);
+            const entry = state.quant.rois[row.rowKey];
+            return {
+              key: row.rowKey,
+              name: row.name,
+              lanes: entry.lanes.map((lane) => window.WBCore.quantifyRoiPair({ pixels: decoded.pixels, width: decoded.width, height: decoded.height, band: lane.band, background: lane.background, polarity: entry.polarity })),
+            };
+          };
+          const loading = await measure(loadingRow);
+          const targets = [];
+          for (const row of targetRows) targets.push(await measure(row));
+          const normalized = window.WBCore.normalizeMeasurements(targets, loading, state.quant.sampleMap, state.quant.controlGroup);
+          const invalidTargets = targets.filter((target) => !normalized.some((row) => row.targetKey === target.key && !row.excluded && row.foldChange !== null));
+          if (invalidTargets.length) throw new Error(`${invalidTargets.map((target) => target.name).join("、")} 缺少有效控制基线或有效灰度，无法生成 Prism 数据`);
+          state.quant.results = {
+            computedAt: new Date().toISOString(),
+            loadingKey: loadingRow.rowKey,
+            loadingName: loadingRow.name,
+            membraneId: loadingRow.membraneId,
+            normalized,
+            summary: window.WBCore.summarizeNormalized(normalized),
+          };
+          markDirty();
+          renderQuantResults();
+          $("#quantStatus").textContent = `已从原始 TIFF 重算 ${normalized.length} 条结果；预览调整未参与计算。`;
+          toast("灰度定量完成，可直接导出 Prism 列式数据");
+        } catch (error) { toast(`定量失败：${error.message}`); }
+        finally { endImageMutation(); }
+      }
+
+      function renderQuantResults() {
+        const results = state.quant.results;
+        const container = $("#quantResults");
+        if (!results) {
+          container.innerHTML = '<p class="field-help" style="padding:12px">尚未计算。</p>';
+          const plot = $("#quantPlot");
+          plot.getContext("2d").clearRect(0, 0, plot.width, plot.height);
+          return;
+        }
+        const rows = results.normalized;
+        container.innerHTML = `<table><thead><tr><th>目的蛋白</th><th>样本</th><th>组别</th><th>生物学重复</th><th>校正灰度</th><th>目的/内参</th><th>Fold</th><th>QC</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${xml(row.target)}</td><td>${xml(row.sampleId)}</td><td>${xml(row.group)}</td><td>${xml(row.biologicalReplicate)}</td><td>${Number(row.targetMeasurement.corrected).toFixed(3)}</td><td>${row.ratio === null ? "NA" : Number(row.ratio).toFixed(4)}</td><td>${row.foldChange === null ? "NA" : Number(row.foldChange).toFixed(4)}</td><td>${xml([...new Set(row.qc)].join("; "))}</td></tr>`).join("")}</tbody></table>`;
+        renderQuantPlot();
+      }
+
+      function renderQuantPlot() {
+        const canvas = $("#quantPlot");
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const results = state.quant.results;
+        if (!results) return;
+        const selectedKey = $("#quantRow").value;
+        const rows = results.normalized.filter((row) => row.targetKey === selectedKey && !row.excluded && row.foldChange !== null);
+        const groups = state.groups.map((group) => group.name).filter((group) => rows.some((row) => row.group === group));
+        if (!rows.length || !groups.length) return;
+        const values = rows.map((row) => row.foldChange);
+        const max = Math.max(1.2, ...values) * 1.15;
+        const margin = { left: 82, right: 32, top: 54, bottom: 86 };
+        const width = canvas.width - margin.left - margin.right;
+        const height = canvas.height - margin.top - margin.bottom;
+        ctx.strokeStyle = "#111827";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(margin.left, margin.top);
+        ctx.lineTo(margin.left, margin.top + height);
+        ctx.lineTo(margin.left + width, margin.top + height);
+        ctx.stroke();
+        ctx.font = "20px Arial, sans-serif";
+        ctx.fillStyle = "#111827";
+        ctx.textAlign = "center";
+        ctx.fillText(rows[0].target, margin.left + width / 2, 28);
+        ctx.save();
+        ctx.translate(24, margin.top + height / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText("Relative expression", 0, 0);
+        ctx.restore();
+        groups.forEach((group, groupIndex) => {
+          const groupRows = rows.filter((row) => row.group === group);
+          const unique = new Map(groupRows.map((row) => [String(row.biologicalReplicate), row.foldChange]));
+          const groupValues = [...unique.values()];
+          const x = margin.left + width * (groupIndex + .5) / groups.length;
+          groupValues.forEach((value, valueIndex) => {
+            const jitter = (valueIndex - (groupValues.length - 1) / 2) * 12;
+            const y = margin.top + height * (1 - value / max);
+            ctx.beginPath();
+            ctx.arc(x + jitter, y, 7, 0, Math.PI * 2);
+            ctx.fillStyle = "#2864e8";
+            ctx.fill();
+          });
+          const summary = results.summary.find((item) => item.targetKey === selectedKey && item.group === group);
+          if (summary?.mean !== null) {
+            const meanY = margin.top + height * (1 - summary.mean / max);
+            const sd = summary.sd || 0;
+            const top = margin.top + height * (1 - Math.min(max, summary.mean + sd) / max);
+            const bottom = margin.top + height * (1 - Math.max(0, summary.mean - sd) / max);
+            ctx.strokeStyle = "#111827";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(x - 25, meanY); ctx.lineTo(x + 25, meanY);
+            ctx.moveTo(x, top); ctx.lineTo(x, bottom);
+            ctx.moveTo(x - 10, top); ctx.lineTo(x + 10, top);
+            ctx.moveTo(x - 10, bottom); ctx.lineTo(x + 10, bottom);
+            ctx.stroke();
+          }
+          ctx.fillStyle = "#111827";
+          ctx.font = "18px Arial, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(group, x, margin.top + height + 35);
+        });
+        ctx.font = "15px Arial, sans-serif";
+        ctx.textAlign = "right";
+        for (let tick = 0; tick <= 4; tick += 1) {
+          const value = max * tick / 4;
+          const y = margin.top + height * (1 - tick / 4);
+          ctx.fillText(value.toFixed(1), margin.left - 12, y + 5);
+        }
+      }
+
+      function quantDetailRows() {
+        const results = state.quant.results;
+        if (!results) return [];
+        return [["target", "lane", "sample_id", "group", "biological_replicate", "technical_replicate", "excluded", "exclusion_note", "target_band_x", "target_band_y", "target_band_w", "target_band_h", "target_background_x", "target_background_y", "target_background_w", "target_background_h", "target_band_sum", "target_band_mean", "target_background_sum", "target_background_mean", "target_background_sd", "target_corrected", "target_signal_clipped_count", "target_signal_clipped_fraction", "target_background_clipped_count", "target_background_clipped_fraction", "loading_band_x", "loading_band_y", "loading_band_w", "loading_band_h", "loading_background_x", "loading_background_y", "loading_background_w", "loading_background_h", "loading_band_sum", "loading_band_mean", "loading_background_sum", "loading_background_mean", "loading_background_sd", "loading_corrected", "loading_signal_clipped_count", "loading_signal_clipped_fraction", "loading_background_clipped_count", "loading_background_clipped_fraction", "target_loading_ratio", "control_mean", "fold_change", "qc_codes"], ...results.normalized.map((row) => [
+          row.target, row.lane, row.sampleId, row.group, row.biologicalReplicate, row.technicalReplicate, row.excluded, row.exclusionNote,
+          row.targetMeasurement.band.x, row.targetMeasurement.band.y, row.targetMeasurement.band.w, row.targetMeasurement.band.h,
+          row.targetMeasurement.background.x, row.targetMeasurement.background.y, row.targetMeasurement.background.w, row.targetMeasurement.background.h,
+          row.targetMeasurement.bandSum, row.targetMeasurement.bandMean, row.targetMeasurement.backgroundSum, row.targetMeasurement.backgroundMean, row.targetMeasurement.backgroundSd, row.targetMeasurement.corrected,
+          row.targetMeasurement.signalClippedCount, row.targetMeasurement.signalClippedFraction, row.targetMeasurement.backgroundClippedCount, row.targetMeasurement.backgroundClippedFraction,
+          row.loadingMeasurement.band.x, row.loadingMeasurement.band.y, row.loadingMeasurement.band.w, row.loadingMeasurement.band.h,
+          row.loadingMeasurement.background.x, row.loadingMeasurement.background.y, row.loadingMeasurement.background.w, row.loadingMeasurement.background.h,
+          row.loadingMeasurement.bandSum, row.loadingMeasurement.bandMean, row.loadingMeasurement.backgroundSum, row.loadingMeasurement.backgroundMean, row.loadingMeasurement.backgroundSd, row.loadingMeasurement.corrected,
+          row.loadingMeasurement.signalClippedCount, row.loadingMeasurement.signalClippedFraction, row.loadingMeasurement.backgroundClippedCount, row.loadingMeasurement.backgroundClippedFraction,
+          row.ratio ?? "NA", row.controlMean ?? "NA", row.foldChange ?? "NA", [...new Set(row.qc)].join(";"),
+        ])];
+      }
+
+      function rowsToCsv(rows) {
+        return "\ufeff" + rows.map((row, rowIndex) => row.map((value) => csvCell(value, rowIndex > 0 && typeof value === "number")).join(",")).join("\r\n");
+      }
+
+      function quantWorkbookSheets() {
+        const results = state.quant.results;
+        if (!results) return [];
+        const prism = window.WBCore.prismColumnTables(results.normalized);
+        return [
+          { name: "Sample_Map", rows: [["lane", "sample_id", "group", "biological_replicate", "technical_replicate", "excluded", "exclusion_note"], ...state.quant.sampleMap.map((sample) => [sample.lane, sample.sampleId, sample.group, sample.biologicalReplicate, sample.technicalReplicate, sample.excluded, sample.exclusionNote])] },
+          { name: "ROI_Raw", rows: quantDetailRows() },
+          { name: "Normalized", rows: [["target", "sample_id", "group", "biological_replicate", "ratio", "control_mean", "fold_change", "qc"], ...results.normalized.map((row) => [row.target, row.sampleId, row.group, row.biologicalReplicate, row.ratio ?? "NA", row.controlMean ?? "NA", row.foldChange ?? "NA", [...new Set(row.qc)].join(";")])] },
+          { name: "Summary", rows: [["target", "group", "n", "mean", "sd"], ...results.summary.map((row) => [row.target, row.group, row.n, row.mean ?? "NA", row.sd ?? "NA"])] },
+          { name: "QC", rows: [["target", "sample_id", "codes"], ...results.normalized.map((row) => [row.target, row.sampleId, [...new Set(row.qc)].join(";")])] },
+          { name: "Metadata", rows: [["key", "value"], ["engine_version", window.WBCore.ENGINE_VERSION], ["computed_at_utc", results.computedAt], ["project_id", state.projectId], ["loading_control", results.loadingName], ["membrane_id", results.membraneId], ["control_group", state.quant.controlGroup], ["note", "All values recalculated from original 8-bit TIFF pixels; preview adjustments were ignored."], ["linear_range_note", "No endpoint saturation does not prove linear detection range."]] },
+          ...prism.map((table) => ({ name: `Prism_${table.name}`, rows: table.rows })),
+        ];
+      }
+
+      function buildQuantPackageEntries(prefix = "") {
+        if (!state.quant.results) return [];
+        const prism = window.WBCore.prismColumnTables(state.quant.results.normalized);
+        const entries = [
+          { name: `${prefix}wb-quantification-detail.csv`, data: rowsToCsv(quantDetailRows()) },
+          { name: `${prefix}wb-quantification-full.xlsx`, data: window.WBCore.xlsxWorkbook(quantWorkbookSheets(), { title: `${artifactStem()} WB quantification` }) },
+        ];
+        prism.forEach((table, index) => {
+          const stem = `${String(index + 1).padStart(2, "0")}-${safeFilePart(table.name)}-prism-column`;
+          entries.push({ name: `${prefix}prism/${stem}.csv`, data: rowsToCsv(table.rows) });
+          entries.push({ name: `${prefix}prism/${stem}.xlsx`, data: window.WBCore.xlsxWorkbook([{ name: "Prism_Column", rows: table.rows }], { title: `${table.name} Prism column data` }) });
+        });
+        entries.push({ name: `${prefix}prism/README.txt`, data: "GraphPad Prism Column 数据\r\n\r\n每个目的蛋白都有独立 CSV 和单工作表 XLSX。第一行为实验组，后续每行为一个生物学重复；可在 Prism 新建 Column table 后直接导入或复制粘贴。技术重复已先在同一生物学重复内取均值。\r\n" });
+        return entries;
+      }
+
+      function exportQuantCsv() {
+        if (!state.quant.results) return toast("请先完成灰度定量");
+        downloadBlob(new Blob([rowsToCsv(quantDetailRows())], { type: "text/csv;charset=utf-8" }), fileName("csv", "quantification-detail"));
+      }
+
+      function exportQuantXlsx() {
+        if (!state.quant.results) return toast("请先完成灰度定量");
+        downloadBlob(new Blob([window.WBCore.xlsxWorkbook(quantWorkbookSheets(), { title: `${artifactStem()} WB quantification` })], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), fileName("xlsx", "quantification"));
+      }
+
+      function exportPrismPackage() {
+        if (!state.quant.results) return toast("请先完成灰度定量");
+        downloadBlob(new Blob([window.WBCore.zipStore(buildQuantPackageEntries())], { type: "application/zip" }), fileName("zip", "prism-column-data"));
+        toast("Prism 数据包已导出：每个目的蛋白均有独立列式 CSV 与 XLSX");
+      }
+
+      function ensurePanelState() {
+        if (!state.panels.some((panel) => panel.type === "wb")) state.panels.unshift({ key: "wb-current", type: "wb", label: "A", name: "Western blot" });
+        state.panels.forEach((panel, index) => { if (!panel.label) panel.label = String.fromCharCode(65 + index); });
+      }
+
+      function openPanels() {
+        if (!ensureExportable()) return;
+        ensurePanelState();
+        renderPanelGrid();
+        $("#panelDialog").showModal();
+      }
+
+      function panelPreviewSource(panel) {
+        if (panel.type === "wb") return buildFigureCanvas(120).toDataURL("image/png");
+        return panel.src || "";
+      }
+
+      function renderPanelGrid() {
+        ensurePanelState();
+        const grid = $("#panelGrid");
+        $("#panelColumns").value = String(state.panelColumns);
+        $("#panelGap").value = String(state.panelGap);
+        const columns = state.panelColumns;
+        grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+        grid.replaceChildren();
+        state.panels.forEach((panel, index) => {
+          const card = document.createElement("article");
+          card.className = "panel-card";
+          card.draggable = true;
+          card.innerHTML = `<span class="panel-label">${xml(panel.label)}</span><img src="${panelPreviewSource(panel)}" alt="${xml(panel.name)}"><div class="row-actions"><input data-panel-label type="text" maxlength="3" value="${xml(panel.label)}" aria-label="面板标签"><span>${xml(panel.name)}</span>${panel.type === "wb" ? "" : '<button class="text-button danger" data-remove-panel type="button">删除</button>'}</div>`;
+          card.addEventListener("dragstart", (event) => event.dataTransfer.setData("text/plain", String(index)));
+          card.addEventListener("dragover", (event) => event.preventDefault());
+          card.addEventListener("drop", (event) => {
+            event.preventDefault();
+            const from = Number(event.dataTransfer.getData("text/plain"));
+            if (!Number.isInteger(from) || from === index) return;
+            const [moved] = state.panels.splice(from, 1);
+            state.panels.splice(index, 0, moved);
+            markDirty();
+            renderPanelGrid();
+          });
+          card.querySelector("[data-panel-label]").addEventListener("input", (event) => {
+            panel.label = event.target.value.trim().slice(0, 3);
+            card.querySelector(".panel-label").textContent = panel.label;
+            markDirty();
+          });
+          card.querySelector("[data-remove-panel]")?.addEventListener("click", () => {
+            state.panels = state.panels.filter((item) => item.key !== panel.key);
+            markDirty();
+            renderPanelGrid();
+          });
+          grid.append(card);
+        });
+      }
+
+      async function addPanelFiles(files) {
+        for (const file of files) {
+          try {
+            if (state.panels.filter((panel) => panel.type !== "wb").length >= 11) throw new Error("每个多面板项目最多加入 11 张外部图片");
+            if (file.size > MAX_FILE_BYTES) throw new Error("单张图片不能超过 25 MB");
+            const panelBytes = state.panels.reduce((sum, panel) => sum + (panel.sourceFile?.size || 0), 0);
+            if (usedUploadBytes() + panelBytes + file.size > MAX_TOTAL_BYTES) throw new Error("当前项目原图总量不能超过 120 MB");
+            let src;
+            let image;
+            if (/\.tiff?$/i.test(file.name)) ({ src, image } = await decodeTiffImage(file));
+            else {
+              src = URL.createObjectURL(file);
+              image = await loadImage(src);
+            }
+            state.panels.push({ key: newRowKey(), type: "image", label: String.fromCharCode(65 + state.panels.length), name: file.name, src, image, sourceFile: file });
+          } catch (error) { toast(`${file.name}：${error.message}`); }
+        }
+        markDirty();
+        renderPanelGrid();
+      }
+
+      async function addQuantPanel() {
+        if (!state.quant.results) return toast("请先完成灰度定量并生成统计图");
+        const blob = await canvasBlob($("#quantPlot"), "image/png");
+        const src = URL.createObjectURL(blob);
+        const image = await loadImage(src);
+        const selected = state.rows.find((row) => row.rowKey === $("#quantRow").value);
+        state.panels.push({ key: newRowKey(), type: "quant", label: String.fromCharCode(65 + state.panels.length), name: `${selected?.name || "WB"} quantification`, src, image, sourceFile: new File([blob], "quantification.png", { type: "image/png" }) });
+        markDirty();
+        renderPanelGrid();
+      }
+
+      function panelGeometry(dpi = state.pngDpi) {
+        ensurePanelState();
+        const columns = Math.max(1, Math.min(3, Number(state.panelColumns || 2)));
+        const gapLogical = Math.max(4, Math.min(80, Number(state.panelGap || 24)));
+        const profile = JOURNAL_PROFILES[state.exportProfile] || JOURNAL_PROFILES.double;
+        const widthCm = profile.targetWidthCm || 18.3;
+        const width = Math.max(600, Math.round(widthCm / 2.54 * dpi));
+        const gap = Math.round(gapLogical / 40 / 2.54 * dpi);
+        const cellWidth = Math.floor((width - gap * (columns - 1)) / columns);
+        const cellHeight = Math.round(cellWidth * .76);
+        const rows = Math.ceil(state.panels.length / columns);
+        return { columns, gap, width, height: rows * cellHeight + Math.max(0, rows - 1) * gap, cellWidth, cellHeight, dpi, widthCm };
+      }
+
+      function panelSourceCanvas(panel, dpi) {
+        if (panel.type === "wb") return buildFigureCanvas(Math.min(600, Math.max(150, dpi)));
+        const canvas = document.createElement("canvas");
+        canvas.width = panel.image.naturalWidth;
+        canvas.height = panel.image.naturalHeight;
+        canvas.getContext("2d").drawImage(panel.image, 0, 0);
+        return canvas;
+      }
+
+      function drawPanelInto(ctx, source, box, label, fontSize) {
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(box.x, box.y, box.w, box.h);
+        const scale = Math.min((box.w - fontSize * .4) / source.width, (box.h - fontSize * .4) / source.height);
+        const width = source.width * scale;
+        const height = source.height * scale;
+        ctx.drawImage(source, box.x + (box.w - width) / 2, box.y + (box.h - height) / 2, width, height);
+        ctx.fillStyle = "#111827";
+        ctx.font = `700 ${fontSize}px Arial, sans-serif`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillText(label, box.x + fontSize * .15, box.y + fontSize * .08);
+      }
+
+      function buildPanelCanvas(dpi = state.pngDpi) {
+        const g = panelGeometry(dpi);
+        const canvas = document.createElement("canvas");
+        canvas.width = g.width;
+        canvas.height = g.height;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const fontSize = Math.max(24, Math.round(9 / 72 * dpi));
+        state.panels.forEach((panel, index) => {
+          const column = index % g.columns;
+          const row = Math.floor(index / g.columns);
+          drawPanelInto(ctx, panelSourceCanvas(panel, dpi), { x: column * (g.cellWidth + g.gap), y: row * (g.cellHeight + g.gap), w: g.cellWidth, h: g.cellHeight }, panel.label || String.fromCharCode(65 + index), fontSize);
+        });
+        return canvas;
+      }
+
+      async function exportPanel(format) {
+        ensurePanelState();
+        const canvas = buildPanelCanvas(state.pngDpi);
+        try {
+          if (format === "png") downloadBlob(await withPngDpi(await canvasBlob(canvas, "image/png"), state.pngDpi), fileName("png", "multi-panel"));
+          else if (format === "tiff") {
+            const rgba = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+            downloadBlob(new Blob([window.WBCore.encodeTiffRgba(canvas.width, canvas.height, rgba, state.pngDpi)], { type: "image/tiff" }), fileName("tiff", "multi-panel"));
+          } else if (format === "pdf") {
+            const jpeg = new Uint8Array(await (await canvasBlob(canvas, "image/jpeg", .96)).arrayBuffer());
+            downloadBlob(new Blob([window.WBCore.pdfFromJpegs([{ jpeg, width: canvas.width, height: canvas.height, dpi: state.pngDpi }], { title: `${artifactStem()} multi-panel figure` })], { type: "application/pdf" }), fileName("pdf", "multi-panel"));
+          } else if (format === "svg") {
+            const g = panelGeometry(state.pngDpi);
+            const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${g.widthCm}cm" height="${(g.widthCm * g.height / g.width).toFixed(4)}cm" viewBox="0 0 ${g.width} ${g.height}"><rect width="100%" height="100%" fill="white"/>`];
+            const fontSize = Math.max(24, Math.round(9 / 72 * state.pngDpi));
+            state.panels.forEach((panel, index) => {
+              const column = index % g.columns;
+              const row = Math.floor(index / g.columns);
+              const x = column * (g.cellWidth + g.gap);
+              const y = row * (g.cellHeight + g.gap);
+              const source = panelSourceCanvas(panel, state.pngDpi);
+              const scale = Math.min((g.cellWidth - fontSize * .4) / source.width, (g.cellHeight - fontSize * .4) / source.height);
+              const width = source.width * scale;
+              const height = source.height * scale;
+              parts.push(`<image href="${source.toDataURL("image/png")}" x="${x + (g.cellWidth - width) / 2}" y="${y + (g.cellHeight - height) / 2}" width="${width}" height="${height}"/>`);
+              parts.push(`<text x="${x + fontSize * .15}" y="${y + fontSize}" font-family="Arial, sans-serif" font-size="${fontSize}" font-weight="700">${xml(panel.label || String.fromCharCode(65 + index))}</text>`);
+            });
+            parts.push("</svg>");
+            downloadBlob(new Blob([parts.join("")], { type: "image/svg+xml;charset=utf-8" }), fileName("svg", "multi-panel"));
+          }
+          toast(`多面板 ${format.toUpperCase()} 已导出`);
+        } catch (error) { toast(`多面板导出失败：${error.message}`); }
+      }
+
+      function layoutTemplate() {
+        return {
+          version: 1,
+          savedAt: new Date().toISOString(),
+          groups: state.groups,
+          laneLabels: state.laneLabels,
+          layoutMode: state.layoutMode,
+          footerLabel: state.footerLabel,
+          laneWidth: state.laneWidth,
+          rowGap: state.rowGap,
+          labelSize: state.labelSize,
+          showMw: state.showMw,
+          showLanes: state.showLanes,
+          showBorder: state.showBorder,
+          exportProfile: state.exportProfile,
+          panelColumns: state.panelColumns,
+          panelGap: state.panelGap,
+          rowLabels: state.rows.map((row) => ({ name: row.name, mw: row.mw, role: row.role })),
+        };
+      }
+
+      function saveTemplate() {
+        localStorage.setItem(TEMPLATE_KEY, JSON.stringify(layoutTemplate()));
+        toast("版式模板已保存到本机，不包含原始图片");
+      }
+
+      function applySavedTemplate() {
+        try {
+          const template = JSON.parse(localStorage.getItem(TEMPLATE_KEY) || "null");
+          if (!template?.groups?.length) return toast("尚未保存版式模板");
+          state.groups = template.groups.map((group) => ({ name: String(group.name).slice(0, 40), count: Math.max(1, Math.min(24, Number(group.count) || 1)) }));
+          if (state.groups.reduce((sum, group) => sum + group.count, 0) > 24) throw new Error("模板样本数超过 24");
+          state.laneLabels = Array.isArray(template.laneLabels) && template.laneLabels.length === totalSamples() ? template.laneLabels.map((label) => String(label).slice(0, 40)) : defaultLaneLabels(state.groups);
+          state.layoutMode = ["compact", "groups"].includes(template.layoutMode) ? template.layoutMode : "compact";
+          state.footerLabel = String(template.footerLabel || "").slice(0, 40);
+          state.laneWidth = Math.max(28, Math.min(130, Number(template.laneWidth) || 40));
+          state.rowHeight = state.laneWidth;
+          state.rowGap = Math.max(0, Math.min(48, Number(template.rowGap) || 0));
+          state.labelSize = Math.max(14, Math.min(28, Number(template.labelSize) || 16));
+          state.showMw = Boolean(template.showMw);
+          state.showLanes = Boolean(template.showLanes);
+          state.showBorder = Boolean(template.showBorder);
+          state.exportProfile = JOURNAL_PROFILES[template.exportProfile] ? template.exportProfile : "preserve";
+          state.panelColumns = Math.max(1, Math.min(3, Number(template.panelColumns) || 2));
+          state.panelGap = Math.max(4, Math.min(80, Number(template.panelGap) || 24));
+          template.rowLabels?.forEach((item, index) => {
+            if (!state.rows[index]) return;
+            state.rows[index].name = String(item.name || state.rows[index].name).slice(0, 40);
+            state.rows[index].mw = String(item.mw || "").slice(0, 20);
+            state.rows[index].role = ["target", "loading", "other"].includes(item.role) ? item.role : state.rows[index].role;
+          });
+          state.quant.sampleMap = [];
+          state.quant.locked = false;
+          state.quant.results = null;
+          markDirty();
+          syncWorkspaceFromState();
+          toast("已应用本机版式模板");
+        } catch (error) { toast(`模板无法应用：${error.message}`); }
+      }
+
+      function lightweightRevision() {
+        return {
+          id: newProjectId(),
+          savedAt: new Date().toISOString(),
+          projectId: state.projectId,
+          layout: layoutTemplate(),
+          rows: state.rows.map((row) => ({ rowKey: row.rowKey, name: row.name, mw: row.mw, role: row.role, membraneId: row.membraneId, nonAdjacent: row.nonAdjacent, splices: row.splices, crop: row.crop, brightness: row.brightness, contrast: row.contrast, invert: row.invert })),
+          quant: { sampleMap: state.quant.sampleMap, rois: state.quant.rois, loadingKey: state.quant.loadingKey, controlGroup: state.quant.controlGroup, locked: state.quant.locked },
+        };
+      }
+
+      function savedRevisions() {
+        try { return JSON.parse(localStorage.getItem(REVISION_KEY) || "[]"); }
+        catch { return []; }
+      }
+
+      function saveRevision() {
+        const revisions = savedRevisions();
+        revisions.unshift(lightweightRevision());
+        localStorage.setItem(REVISION_KEY, JSON.stringify(revisions.slice(0, 12)));
+        renderHistoryList();
+        toast("当前版本已保存；原图仍由项目文件统一保留");
+      }
+
+      function restoreRevision(revision) {
+        if (revision.projectId !== state.projectId && !confirm("这个版本来自另一个项目，只会恢复可匹配的设置和条带行，继续吗？")) return;
+        const template = revision.layout;
+        localStorage.setItem(TEMPLATE_KEY, JSON.stringify(template));
+        applySavedTemplate();
+        const metadata = new Map((revision.rows || []).map((row) => [row.rowKey, row]));
+        state.rows.forEach((row) => {
+          const saved = metadata.get(row.rowKey);
+          if (!saved) return;
+          row.name = saved.name;
+          row.mw = saved.mw;
+          row.role = saved.role;
+          row.membraneId = saved.membraneId;
+          row.nonAdjacent = saved.nonAdjacent;
+          row.splices = saved.splices || [];
+          if (saved.crop) row.crop = validatedRestoredCrop(row, saved.crop);
+          row.brightness = saved.brightness;
+          row.contrast = saved.contrast;
+          row.invert = saved.invert;
+        });
+        state.quant = { ...state.quant, ...(revision.quant || {}), results: null };
+        markDirty();
+        syncWorkspaceFromState();
+        $("#historyDialog").close();
+        toast("版本已恢复；定量数值需从原始 TIFF 重新计算");
+      }
+
+      function deleteRevision(id) {
+        localStorage.setItem(REVISION_KEY, JSON.stringify(savedRevisions().filter((revision) => revision.id !== id)));
+        renderHistoryList();
+      }
+
+      function renderHistoryList() {
+        const list = $("#historyList");
+        const revisions = savedRevisions();
+        list.replaceChildren();
+        if (!revisions.length) {
+          list.innerHTML = '<p class="field-help">尚未保存命名版本。自动保存仍在本机持续工作。</p>';
+          return;
+        }
+        revisions.forEach((revision) => {
+          const row = document.createElement("div");
+          row.className = "history-item";
+          row.innerHTML = `<div><strong>${new Date(revision.savedAt).toLocaleString("zh-CN")}</strong><p>${xml(revision.layout?.groups?.map((group) => `${group.name}×${group.count}`).join("，") || "")}</p></div><div class="row-actions"><button class="text-button" data-restore type="button">恢复</button><button class="text-button danger" data-delete type="button">删除</button></div>`;
+          row.querySelector("[data-restore]").addEventListener("click", () => restoreRevision(revision));
+          row.querySelector("[data-delete]").addEventListener("click", () => deleteRevision(revision.id));
+          list.append(row);
+        });
+      }
+
+      function openHistory() {
+        renderHistoryList();
+        $("#historyDialog").showModal();
       }
 
       function setAutosaveStatus(message) {
@@ -1662,11 +3072,26 @@
             showLanes: state.showLanes,
             showBorder: state.showBorder,
             demoLoaded: state.demoLoaded,
-            exportDpi: state.pngDpi
+            exportDpi: state.pngDpi,
+            exportProfile: state.exportProfile,
+            panelColumns: state.panelColumns,
+            panelGap: state.panelGap,
+            quant: {
+              sampleMap: state.quant.sampleMap,
+              rois: state.quant.rois,
+              loadingKey: state.quant.loadingKey,
+              controlGroup: state.quant.controlGroup,
+              locked: state.quant.locked,
+            }
           },
           rows: state.rows.map((row) => ({
+            rowKey: row.rowKey,
             name: row.name,
             mw: row.mw,
+            role: row.role,
+            membraneId: row.membraneId,
+            nonAdjacent: row.nonAdjacent,
+            splices: [...(row.splices || [])],
             crop: row.crop ? { ...row.crop } : null,
             brightness: row.brightness,
             contrast: row.contrast,
@@ -1679,7 +3104,20 @@
               sha256: row.sourceSha256 || "",
               blob: row.sourceFile
             } : null
-          }))
+          })),
+          panels: state.panels.filter((panel) => panel.type !== "wb").map((panel) => ({
+            key: panel.key,
+            type: panel.type,
+            label: panel.label,
+            name: panel.name,
+            source: panel.sourceFile ? {
+              name: panel.sourceFile.name,
+              type: panel.sourceFile.type,
+              size: panel.sourceFile.size,
+              lastModified: panel.sourceFile.lastModified || 0,
+              blob: panel.sourceFile,
+            } : null,
+          })),
         };
       }
 
@@ -1725,20 +3163,30 @@
         return new Blob([bytes], { type: match[1] || "application/octet-stream" });
       }
 
+      async function portableProjectObject() {
+        const snapshot = projectSnapshot();
+        const portableRows = [];
+        for (const row of snapshot.rows) {
+          if (!row.source) {
+            portableRows.push(row);
+            continue;
+          }
+          const { blob, ...source } = row.source;
+          portableRows.push({ ...row, source: { ...source, dataUrl: await blobToDataUrl(blob) } });
+        }
+        const portablePanels = [];
+        for (const panel of snapshot.panels || []) {
+          if (!panel.source) { portablePanels.push(panel); continue; }
+          const { blob, ...source } = panel.source;
+          portablePanels.push({ ...panel, source: { ...source, dataUrl: await blobToDataUrl(blob) } });
+        }
+        return { ...snapshot, rows: portableRows, panels: portablePanels };
+      }
+
       async function exportProject() {
         try {
-          const snapshot = projectSnapshot();
-          const portableRows = [];
           setAutosaveStatus("正在生成项目文件…");
-          for (const row of snapshot.rows) {
-            if (!row.source) {
-              portableRows.push(row);
-              continue;
-            }
-            const { blob, ...source } = row.source;
-            portableRows.push({ ...row, source: { ...source, dataUrl: await blobToDataUrl(blob) } });
-          }
-          const portable = { ...snapshot, rows: portableRows };
+          const portable = await portableProjectObject();
           downloadBlob(new Blob([JSON.stringify(portable)], { type: "application/json;charset=utf-8" }), fileName("wb-project", "project"));
           setAutosaveStatus(state.dirty ? "待保存" : "已保存到本机");
           toast("项目文件已保存，包含原始图片和全部设置");
@@ -1760,7 +3208,7 @@
 
       function validateProject(project) {
         if (!project || project.kind !== PROJECT_KIND) throw new Error("这不是 BlotBoard 项目文件");
-        if (project.version !== PROJECT_VERSION) throw new Error(`项目版本 ${project.version ?? "未知"} 暂不支持，请使用新版网页`);
+        if (![1, PROJECT_VERSION].includes(project.version)) throw new Error(`项目版本 ${project.version ?? "未知"} 暂不支持，请使用新版网页`);
         if (typeof project.projectId !== "string" || !/^[a-zA-Z0-9-]{8,80}$/.test(project.projectId)) throw new Error("项目标识无效");
         if (typeof project.modifiedAt !== "string" || !Number.isFinite(Date.parse(project.modifiedAt))) throw new Error("项目修改时间无效");
         const settings = project.settings;
@@ -1789,15 +3237,24 @@
           showLanes: booleanValue(settings.showLanes, "泳道编号开关"),
           showBorder: booleanValue(settings.showBorder, "边框开关"),
           demoLoaded: booleanValue(settings.demoLoaded, "示例状态"),
-          exportDpi: settings.exportDpi === 600 ? 600 : 300
+          exportDpi: settings.exportDpi === 600 ? 600 : 300,
+          exportProfile: JOURNAL_PROFILES[settings.exportProfile] ? settings.exportProfile : "preserve",
+          panelColumns: Number.isInteger(settings.panelColumns) && settings.panelColumns >= 1 && settings.panelColumns <= 3 ? settings.panelColumns : 2,
+          panelGap: Number.isFinite(settings.panelGap) && settings.panelGap >= 4 && settings.panelGap <= 80 ? settings.panelGap : 24,
+          quant: { sampleMap: [], rois: {}, loadingKey: "", controlGroup: groups[0]?.name || "", locked: false, results: null },
         };
         if (normalizedSettings.laneWidth !== normalizedSettings.rowHeight) throw new Error("泳道宽度与条带高度必须一致");
         if (!Array.isArray(project.rows) || project.rows.length > MAX_ROWS) throw new Error(`项目条带行不能超过 ${MAX_ROWS} 行`);
         const rows = project.rows.map((row) => {
           if (!row || typeof row.name !== "string" || row.name.length > 40 || typeof row.mw !== "string" || row.mw.length > 20) throw new Error("项目中的蛋白标签无效");
           const normalized = {
+            rowKey: typeof row.rowKey === "string" && /^[a-zA-Z0-9-]{8,100}$/.test(row.rowKey) ? row.rowKey : newRowKey(),
             name: row.name,
             mw: row.mw,
+            role: ["target", "loading", "other"].includes(row.role) ? row.role : "target",
+            membraneId: typeof row.membraneId === "string" && row.membraneId.length <= 40 ? row.membraneId : "",
+            nonAdjacent: typeof row.nonAdjacent === "boolean" ? row.nonAdjacent : false,
+            splices: Array.isArray(row.splices) ? [...new Set(row.splices.filter((value) => Number.isInteger(value) && value > 0 && value < laneCount))].sort((a, b) => a - b) : [],
             crop: row.crop,
             brightness: finiteInRange(row.brightness, 50, 160, "亮度"),
             contrast: finiteInRange(row.contrast, 50, 200, "对比度"),
@@ -1816,7 +3273,46 @@
           }
           return normalized;
         });
-        return { projectId: project.projectId, modifiedAt: new Date(project.modifiedAt).toISOString(), settings: normalizedSettings, rows };
+        const rowKeys = new Set(rows.map((row) => row.rowKey));
+        const quant = settings.quant;
+        if (project.version === PROJECT_VERSION && quant && typeof quant === "object") {
+          const sampleMap = Array.isArray(quant.sampleMap) ? quant.sampleMap.slice(0, laneCount).map((sample, index) => ({
+            lane: index + 1,
+            sampleId: typeof sample?.sampleId === "string" ? sample.sampleId.slice(0, 80) : normalizedSettings.laneLabels[index],
+            group: typeof sample?.group === "string" ? sample.group.slice(0, 80) : "",
+            biologicalReplicate: typeof sample?.biologicalReplicate === "string" || Number.isFinite(sample?.biologicalReplicate) ? String(sample.biologicalReplicate).slice(0, 40) : String(index + 1),
+            technicalReplicate: typeof sample?.technicalReplicate === "string" || Number.isFinite(sample?.technicalReplicate) ? String(sample.technicalReplicate).slice(0, 40) : "",
+            excluded: Boolean(sample?.excluded),
+            exclusionNote: typeof sample?.exclusionNote === "string" ? sample.exclusionNote.slice(0, 200) : "",
+          })) : [];
+          const rois = {};
+          if (quant.rois && typeof quant.rois === "object") Object.entries(quant.rois).forEach(([rowKey, value]) => {
+            if (!rowKeys.has(rowKey) || !value || !Array.isArray(value.lanes) || value.lanes.length > laneCount) return;
+            const lanes = value.lanes.map((lane) => {
+              const roi = (candidate) => candidate && [candidate.x, candidate.y, candidate.w, candidate.h].every(Number.isFinite) ? { x: candidate.x, y: candidate.y, w: candidate.w, h: candidate.h } : null;
+              return { band: roi(lane?.band), background: roi(lane?.background) };
+            });
+            if (lanes.every((lane) => lane.band && lane.background)) rois[rowKey] = { polarity: value.polarity === "bright" ? "bright" : "dark", confirmed: Boolean(value.confirmed), lanes };
+          });
+          normalizedSettings.quant = {
+            sampleMap,
+            rois,
+            loadingKey: rowKeys.has(quant.loadingKey) ? quant.loadingKey : "",
+            controlGroup: typeof quant.controlGroup === "string" ? quant.controlGroup.slice(0, 80) : groups[0]?.name || "",
+            locked: Boolean(quant.locked) && sampleMap.length === laneCount,
+            results: null,
+          };
+        }
+        const panels = (project.version === PROJECT_VERSION && Array.isArray(project.panels) ? project.panels : []).slice(0, 12).map((panel) => {
+          if (!panel || typeof panel.key !== "string" || panel.key.length > 100 || !["image", "quant"].includes(panel.type) || typeof panel.label !== "string" || panel.label.length > 3 || typeof panel.name !== "string" || panel.name.length > 260) throw new Error("项目中的多面板信息无效");
+          const source = panel.source;
+          if (!source || typeof source.name !== "string" || !source.name || source.name.length > 260 || typeof source.type !== "string" || source.type.length > 100) throw new Error("项目中的多面板原图信息无效");
+          finiteInRange(source.size, 1, MAX_FILE_BYTES, "多面板原图大小");
+          finiteInRange(source.lastModified, 0, 8.64e15, "多面板原图时间");
+          if (!(source.blob instanceof Blob) && typeof source.dataUrl !== "string") throw new Error("项目缺少多面板图片数据");
+          return { key: panel.key, type: panel.type, label: panel.label, name: panel.name, source };
+        });
+        return { projectId: project.projectId, modifiedAt: new Date(project.modifiedAt).toISOString(), settings: normalizedSettings, rows, panels };
       }
 
       function validatedRestoredCrop(row, crop) {
@@ -1829,6 +3325,7 @@
       async function hydrateProject(project) {
         const normalized = validateProject(project);
         const temporaryRows = [];
+        const temporaryPanels = [];
         let totalBytes = 0;
         try {
           for (const item of normalized.rows) {
@@ -1836,6 +3333,11 @@
               const row = blankRow();
               row.name = item.name;
               row.mw = item.mw;
+              row.rowKey = item.rowKey;
+              row.role = item.role;
+              row.membraneId = item.membraneId;
+              row.nonAdjacent = item.nonAdjacent;
+              row.splices = item.splices;
               row.brightness = item.brightness;
               row.contrast = item.contrast;
               row.invert = item.invert;
@@ -1852,14 +3354,32 @@
             if (item.source.sha256 && item.source.sha256 !== row.sourceSha256) throw new Error(`${item.source.name}：无法通过 SHA-256 校验，文件可能已损坏或当前浏览器不支持校验`);
             row.name = item.name;
             row.mw = item.mw;
+            row.rowKey = item.rowKey;
+            row.role = item.role;
+            row.membraneId = item.membraneId;
+            row.nonAdjacent = item.nonAdjacent;
+            row.splices = item.splices;
             row.crop = validatedRestoredCrop(row, item.crop);
             row.brightness = item.brightness;
             row.contrast = item.contrast;
             row.invert = item.invert;
           }
-          return { projectId: normalized.projectId, modifiedAt: normalized.modifiedAt, settings: normalized.settings, rows: temporaryRows };
+          for (const item of normalized.panels) {
+            const sourceBlob = item.source.blob instanceof Blob ? item.source.blob : dataUrlToBlob(item.source.dataUrl);
+            if (sourceBlob.size !== item.source.size) throw new Error(`${item.source.name}：多面板文件大小校验失败`);
+            totalBytes += sourceBlob.size;
+            if (totalBytes > MAX_TOTAL_BYTES) throw new Error("项目原始图片总量超过 120 MB");
+            const file = new File([sourceBlob], item.source.name, { type: item.source.type || sourceBlob.type, lastModified: item.source.lastModified });
+            let src;
+            let image;
+            if (/\.tiff?$/i.test(file.name)) ({ src, image } = await decodeTiffImage(file));
+            else { src = URL.createObjectURL(file); image = await loadImage(src); }
+            temporaryPanels.push({ key: item.key, type: item.type, label: item.label, name: item.name, sourceFile: file, src, image });
+          }
+          return { projectId: normalized.projectId, modifiedAt: normalized.modifiedAt, settings: normalized.settings, rows: temporaryRows, panels: temporaryPanels };
         } catch (error) {
           temporaryRows.forEach((row) => { if (row.objectUrl) URL.revokeObjectURL(row.objectUrl); });
+          temporaryPanels.forEach((panel) => { if (panel.src?.startsWith("blob:")) URL.revokeObjectURL(panel.src); });
           throw error;
         }
       }
@@ -1869,6 +3389,7 @@
         state.editor = null;
         pointerAction = null;
         const previousRows = state.rows;
+        const previousPanels = state.panels;
         const settings = hydrated.settings;
         state.projectId = hydrated.projectId;
         state.modifiedAt = hydrated.modifiedAt;
@@ -1884,20 +3405,22 @@
         state.showLanes = settings.showLanes;
         state.showBorder = settings.showBorder;
         state.pngDpi = settings.exportDpi;
+        state.exportProfile = settings.exportProfile;
+        state.quant = settings.quant;
+        state.panels = hydrated.panels || [];
+        state.panelColumns = settings.panelColumns;
+        state.panelGap = settings.panelGap;
         state.rows = hydrated.rows;
         state.demoLoaded = settings.demoLoaded;
         state.dirty = false;
         previousRows.forEach((row) => { if (row.objectUrl) URL.revokeObjectURL(row.objectUrl); });
-        $("#groupInput").value = groupsToText(state.groups);
-        $("#laneLabelInput").value = laneLabelsToText(state.laneLabels);
-        syncLayoutControls();
-        renderGroupSummary();
-        renderRows();
-        requestRender();
+        previousPanels.forEach((panel) => { if (panel.src?.startsWith("blob:")) URL.revokeObjectURL(panel.src); });
+        syncWorkspaceFromState();
       }
 
       function discardHydratedProject(hydrated) {
         hydrated?.rows?.forEach((row) => { if (row.objectUrl) URL.revokeObjectURL(row.objectUrl); });
+        hydrated?.panels?.forEach((panel) => { if (panel.src?.startsWith("blob:")) URL.revokeObjectURL(panel.src); });
       }
 
       async function importProjectFile(file) {
@@ -1936,8 +3459,8 @@
         return `"${text.replace(/"/g, '""')}"`;
       }
 
-      async function exportAuditCsv() {
-        if (!state.rows.length) return toast("当前没有可记录的条带行");
+      async function buildAuditCsvText() {
+        if (!state.rows.length) throw new Error("当前没有可记录的条带行");
         const g = geometry();
         const lanes = Math.max(1, totalSamples());
         const timestamp = new Date().toISOString();
@@ -1948,7 +3471,7 @@
           ["brightness_percent", true], ["contrast_percent", true], ["inverted", false], ["layout_mode", false], ["lane_count", true],
           ["groups_json", false], ["lane_labels_json", false], ["footer_label", false], ["font_family", false], ["label_size_logical_px", true], ["label_size_pt", true], ["strip_height_cm", true],
           ["lane_width_cm", true], ["row_gap_cm", true], ["figure_width_cm", true], ["figure_height_cm", true], ["selected_png_dpi", true],
-          ["show_mw", false], ["show_lanes", false], ["show_border", false]
+          ["show_mw", false], ["show_lanes", false], ["show_border", false], ["row_key", false], ["quant_role", false], ["membrane_id", false], ["non_adjacent_lanes", false], ["splice_boundaries_json", false], ["export_profile", false]
         ];
         const decimal = (value) => Number(Number(value).toFixed(6));
         const records = await Promise.all(state.rows.map(async (row, index) => {
@@ -1996,12 +3519,24 @@
             selected_png_dpi: state.pngDpi,
             show_mw: state.showMw,
             show_lanes: state.showLanes,
-            show_border: state.showBorder
+            show_border: state.showBorder,
+            row_key: row.rowKey,
+            quant_role: row.role,
+            membrane_id: row.membraneId,
+            non_adjacent_lanes: row.nonAdjacent,
+            splice_boundaries_json: JSON.stringify(row.splices || []),
+            export_profile: state.exportProfile,
           };
         }));
         const lines = [columns.map(([name]) => csvCell(name)).join(",")];
         records.forEach((record) => lines.push(columns.map(([name, numeric]) => csvCell(record[name], numeric)).join(",")));
-        downloadBlob(new Blob(["\ufeff", lines.join("\r\n")], { type: "text/csv;charset=utf-8" }), fileName("csv", "processing-record"));
+        return "\ufeff" + lines.join("\r\n");
+      }
+
+      async function exportAuditCsv() {
+        try {
+          downloadBlob(new Blob([await buildAuditCsvText()], { type: "text/csv;charset=utf-8" }), fileName("csv", "processing-record"));
+        } catch (error) { return toast(error.message); }
         toast("处理记录 CSV 已导出");
       }
 
@@ -2359,6 +3894,10 @@
           const laneLabels = parseLaneLabels(laneLabelText, groups);
           state.groups = groups;
           state.laneLabels = laneLabels;
+          state.quant.sampleMap = [];
+          state.quant.locked = false;
+          state.quant.results = null;
+          Object.values(state.quant.rois || {}).forEach((entry) => { entry.confirmed = false; });
           $("#groupInput").value = groupsToText(state.groups);
           $("#laneLabelInput").value = laneLabelText.trim() ? laneLabelsToText(state.laneLabels) : "";
           markDirty();
@@ -2433,9 +3972,17 @@
         $("#" + inputId).addEventListener("change", (event) => { state[key] = event.target.checked; markDirty(); requestRender(); });
       });
       $("#exportPng").addEventListener("click", exportPng);
+      $("#exportTiff").addEventListener("click", exportTiff);
+      $("#exportPdf").addEventListener("click", exportPdf);
       $("#exportSvg").addEventListener("click", exportSvg);
       $("#copyPng").addEventListener("click", copyPng);
       $("#pngDpi").addEventListener("change", (event) => { state.pngDpi = Number(event.target.value) === 600 ? 600 : 300; markDirty(); });
+      $("#journalProfile").addEventListener("change", (event) => { state.exportProfile = JOURNAL_PROFILES[event.target.value] ? event.target.value : "preserve"; markDirty(); });
+      $("#openPreflight").addEventListener("click", openPreflight);
+      $("#downloadPreflight").addEventListener("click", downloadPreflightReport);
+      $("#openQuant").addEventListener("click", openQuant);
+      $("#openPanels").addEventListener("click", openPanels);
+      $("#exportPackage").addEventListener("click", exportCompliancePackage);
       $("#saveProject").addEventListener("click", exportProject);
       $("#openProject").addEventListener("click", () => $("#projectFile").click());
       $("#newProject").addEventListener("click", newProject);
@@ -2445,6 +3992,104 @@
         if (file) importProjectFile(file);
       });
       $("#exportAudit").addEventListener("click", exportAuditCsv);
+      $("#saveTemplate").addEventListener("click", saveTemplate);
+      $("#openHistory").addEventListener("click", openHistory);
+      $("#saveRevision").addEventListener("click", saveRevision);
+      $("#applyTemplate").addEventListener("click", applySavedTemplate);
+      $("#undoAction").addEventListener("click", undo);
+      $("#redoAction").addEventListener("click", redo);
+
+      document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => $("#" + button.dataset.closeDialog).close()));
+
+      $("#quantRow").addEventListener("change", async () => { await loadQuantRow(); renderQuantResults(); });
+      $("#quantLoading").addEventListener("change", (event) => {
+        state.quant.loadingKey = event.target.value;
+        state.rows.forEach((row) => {
+          if (row.rowKey === state.quant.loadingKey) row.role = "loading";
+          else if (row.role === "loading") row.role = "target";
+        });
+        state.quant.results = null;
+        markDirty();
+        renderRows();
+      });
+      $("#quantControlGroup").addEventListener("change", (event) => { state.quant.controlGroup = event.target.value; state.quant.results = null; markDirty(); });
+      $("#quantPolarity").addEventListener("change", (event) => {
+        const entry = quantView && state.quant.rois[quantView.row.rowKey];
+        if (entry) { entry.polarity = event.target.value === "bright" ? "bright" : "dark"; entry.confirmed = false; state.quant.results = null; markDirty(); }
+      });
+      $("#quantMembrane").addEventListener("input", (event) => {
+        if (!quantView) return;
+        quantView.row.membraneId = event.target.value.trim();
+        state.quant.results = null;
+        markDirty();
+      });
+      $("#quantMapLocked").addEventListener("change", (event) => { state.quant.locked = event.target.checked; markDirty(); });
+      $("#quantLane").addEventListener("change", paintQuantCanvas);
+      $("#quantRoiType").addEventListener("change", paintQuantCanvas);
+      $("#initializeRois").addEventListener("click", initializeQuantRois);
+      $("#calculateQuant").addEventListener("click", calculateQuantification);
+      $("#exportQuantCsv").addEventListener("click", exportQuantCsv);
+      $("#exportQuantXlsx").addEventListener("click", exportQuantXlsx);
+      $("#exportPrism").addEventListener("click", exportPrismPackage);
+
+      $("#quantCanvas").addEventListener("pointerdown", (event) => {
+        const roi = selectedQuantRoi();
+        if (!roi || !quantView) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const x = (event.clientX - rect.left) * event.currentTarget.width / rect.width / quantView.scale;
+        const y = (event.clientY - rect.top) * event.currentTarget.height / rect.height / quantView.scale;
+        quantDrag = { pointerId: event.pointerId, dx: x - roi.x, dy: y - roi.y, start: { ...roi } };
+        event.currentTarget.setPointerCapture(event.pointerId);
+        if (!(x >= roi.x && x <= roi.x + roi.w && y >= roi.y && y <= roi.y + roi.h)) {
+          roi.x = x - roi.w / 2;
+          roi.y = y - roi.h / 2;
+          quantDrag.dx = roi.w / 2;
+          quantDrag.dy = roi.h / 2;
+          clampQuantRoi(roi);
+          paintQuantCanvas();
+        }
+      });
+      $("#quantCanvas").addEventListener("pointermove", (event) => {
+        if (!quantDrag || quantDrag.pointerId !== event.pointerId) return;
+        const roi = selectedQuantRoi();
+        const rect = event.currentTarget.getBoundingClientRect();
+        const x = (event.clientX - rect.left) * event.currentTarget.width / rect.width / quantView.scale;
+        const y = (event.clientY - rect.top) * event.currentTarget.height / rect.height / quantView.scale;
+        roi.x = x - quantDrag.dx;
+        roi.y = y - quantDrag.dy;
+        clampQuantRoi(roi);
+        state.quant.rois[quantView.row.rowKey].confirmed = false;
+        state.quant.results = null;
+        paintQuantCanvas();
+      });
+      const finishQuantDrag = (event) => {
+        if (!quantDrag || quantDrag.pointerId !== event.pointerId) return;
+        quantDrag = null;
+        markDirty();
+      };
+      $("#quantCanvas").addEventListener("pointerup", finishQuantDrag);
+      $("#quantCanvas").addEventListener("pointercancel", finishQuantDrag);
+      $("#quantCanvas").addEventListener("keydown", (event) => {
+        const step = event.shiftKey ? 10 : 1;
+        if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "[", "]"].includes(event.key)) event.preventDefault();
+        if (event.key === "ArrowLeft") moveQuantRoi(-step, 0);
+        if (event.key === "ArrowRight") moveQuantRoi(step, 0);
+        if (event.key === "ArrowUp") moveQuantRoi(0, -step);
+        if (event.key === "ArrowDown") moveQuantRoi(0, step);
+        if (event.key === "[") resizeQuantRois(-step * 2);
+        if (event.key === "]") resizeQuantRois(step * 2);
+        if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) markDirty();
+      });
+
+      $("#panelColumns").addEventListener("change", (event) => { state.panelColumns = Math.max(1, Math.min(3, Number(event.target.value) || 2)); markDirty(); renderPanelGrid(); });
+      $("#panelGap").addEventListener("change", (event) => { state.panelGap = Math.max(4, Math.min(80, Number(event.target.value) || 24)); markDirty(); renderPanelGrid(); });
+      $("#addPanelImages").addEventListener("click", () => $("#panelFile").click());
+      $("#panelFile").addEventListener("change", (event) => { addPanelFiles(event.target.files); event.target.value = ""; });
+      $("#addQuantPanel").addEventListener("click", addQuantPanel);
+      $("#exportPanelPng").addEventListener("click", () => exportPanel("png"));
+      $("#exportPanelTiff").addEventListener("click", () => exportPanel("tiff"));
+      $("#exportPanelPdf").addEventListener("click", () => exportPanel("pdf"));
+      $("#exportPanelSvg").addEventListener("click", () => exportPanel("svg"));
 
       $("#closeEditor").addEventListener("click", closeEditor);
       $("#cancelEditor").addEventListener("click", closeEditor);
@@ -2470,6 +4115,15 @@
       });
       imageEditor.addEventListener("cancel", (event) => { event.preventDefault(); closeEditor(); });
       window.addEventListener("resize", () => { if (state.editor) renderEditor(); });
+      document.addEventListener("keydown", (event) => {
+        const modifier = event.ctrlKey || event.metaKey;
+        if (modifier && event.key.toLowerCase() === "s") { event.preventDefault(); exportProject(); }
+        else if (modifier && event.key.toLowerCase() === "o") { event.preventDefault(); $("#projectFile").click(); }
+        else if (modifier && event.key.toLowerCase() === "z" && event.shiftKey) { event.preventDefault(); redo(); }
+        else if (modifier && event.key.toLowerCase() === "z") { event.preventDefault(); undo(); }
+        else if (modifier && event.key.toLowerCase() === "y") { event.preventDefault(); redo(); }
+        else if (event.key === "?" && !/INPUT|TEXTAREA|SELECT/.test(event.target.tagName)) toast("快捷键：Ctrl+S 保存项目，Ctrl+O 打开项目，Ctrl+Z 撤销，Ctrl+Shift+Z 重做");
+      });
       window.addEventListener("beforeunload", (event) => {
         if (!state.dirty) return;
         event.preventDefault();
@@ -2481,8 +4135,12 @@
       initialize().finally(() => {
         $(".workspace").inert = false;
         $(".workspace").removeAttribute("aria-busy");
+        resetUndoBaseline();
       });
     })();
+  </script>
+  <script>
+    if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
   </script>
 </body>
 </html>

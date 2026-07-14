@@ -1,0 +1,19 @@
+{
+  "name": "FigureLab · WB 科研组图",
+  "short_name": "FigureLab WB",
+  "description": "在浏览器本地完成 Western blot 组图、定量与投稿导出。",
+  "lang": "zh-CN",
+  "start_url": "./#studio",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f8fc",
+  "theme_color": "#2864e8",
+  "icons": [
+    {
+      "src": "./icons/figurelab-wb.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
