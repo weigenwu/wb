@@ -1,0 +1,481 @@
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === "object" && module.exports) module.exports = api;
+  else root.WBCore = api;
+})(typeof globalThis === "undefined" ? this : globalThis, function () {
+  "use strict";
+
+  const ENGINE_VERSION = "2.0.0";
+  const encoder = new TextEncoder();
+
+  function bytes(value) {
+    if (value instanceof Uint8Array) return value;
+    if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    return encoder.encode(String(value));
+  }
+
+  function concat(parts) {
+    const output = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+    let offset = 0;
+    parts.forEach((part) => {
+      output.set(part, offset);
+      offset += part.length;
+    });
+    return output;
+  }
+
+  function crc32(input) {
+    const data = bytes(input);
+    let crc = 0xffffffff;
+    for (const value of data) {
+      crc ^= value;
+      for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  function dosTime(date) {
+    const value = date instanceof Date ? date : new Date(date || Date.now());
+    const year = Math.max(1980, value.getFullYear());
+    return {
+      time: (value.getHours() << 11) | (value.getMinutes() << 5) | Math.floor(value.getSeconds() / 2),
+      date: ((year - 1980) << 9) | ((value.getMonth() + 1) << 5) | value.getDate(),
+    };
+  }
+
+  function zipStore(entries) {
+    const locals = [];
+    const centrals = [];
+    let localOffset = 0;
+    const stamp = dosTime(new Date());
+    entries.forEach((entry) => {
+      const name = bytes(String(entry.name).replaceAll("\\", "/").replace(/^\/+/, ""));
+      const data = bytes(entry.data);
+      const checksum = crc32(data);
+      const local = new Uint8Array(30 + name.length);
+      const view = new DataView(local.buffer);
+      view.setUint32(0, 0x04034b50, true);
+      view.setUint16(4, 20, true);
+      view.setUint16(6, 0x0800, true);
+      view.setUint16(8, 0, true);
+      view.setUint16(10, stamp.time, true);
+      view.setUint16(12, stamp.date, true);
+      view.setUint32(14, checksum, true);
+      view.setUint32(18, data.length, true);
+      view.setUint32(22, data.length, true);
+      view.setUint16(26, name.length, true);
+      local.set(name, 30);
+      locals.push(local, data);
+
+      const central = new Uint8Array(46 + name.length);
+      const centralView = new DataView(central.buffer);
+      centralView.setUint32(0, 0x02014b50, true);
+      centralView.setUint16(4, 20, true);
+      centralView.setUint16(6, 20, true);
+      centralView.setUint16(8, 0x0800, true);
+      centralView.setUint16(10, 0, true);
+      centralView.setUint16(12, stamp.time, true);
+      centralView.setUint16(14, stamp.date, true);
+      centralView.setUint32(16, checksum, true);
+      centralView.setUint32(20, data.length, true);
+      centralView.setUint32(24, data.length, true);
+      centralView.setUint16(28, name.length, true);
+      centralView.setUint32(42, localOffset, true);
+      central.set(name, 46);
+      centrals.push(central);
+      localOffset += local.length + data.length;
+    });
+
+    const centralSize = centrals.reduce((sum, part) => sum + part.length, 0);
+    const end = new Uint8Array(22);
+    const endView = new DataView(end.buffer);
+    endView.setUint32(0, 0x06054b50, true);
+    endView.setUint16(8, entries.length, true);
+    endView.setUint16(10, entries.length, true);
+    endView.setUint32(12, centralSize, true);
+    endView.setUint32(16, localOffset, true);
+    return concat([...locals, ...centrals, end]);
+  }
+
+  function encodeTiffRgba(width, height, rgba, dpi = 300) {
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) throw new Error("TIFF dimensions are invalid");
+    const source = bytes(rgba);
+    if (source.length !== width * height * 4) throw new Error("RGBA byte length does not match dimensions");
+    const entryCount = 13;
+    const ifdOffset = 8;
+    const ifdEnd = ifdOffset + 2 + entryCount * 12 + 4;
+    const bitsOffset = ifdEnd;
+    const xResolutionOffset = bitsOffset + 6;
+    const yResolutionOffset = xResolutionOffset + 8;
+    const pixelOffset = yResolutionOffset + 8;
+    const pixelBytes = width * height * 3;
+    const output = new Uint8Array(pixelOffset + pixelBytes);
+    const view = new DataView(output.buffer);
+    output[0] = 0x49;
+    output[1] = 0x49;
+    view.setUint16(2, 42, true);
+    view.setUint32(4, ifdOffset, true);
+    view.setUint16(ifdOffset, entryCount, true);
+    let cursor = ifdOffset + 2;
+    const entry = (tag, type, count, value) => {
+      view.setUint16(cursor, tag, true);
+      view.setUint16(cursor + 2, type, true);
+      view.setUint32(cursor + 4, count, true);
+      if (type === 3 && count === 1) view.setUint16(cursor + 8, value, true);
+      else view.setUint32(cursor + 8, value, true);
+      cursor += 12;
+    };
+    entry(256, 4, 1, width);
+    entry(257, 4, 1, height);
+    entry(258, 3, 3, bitsOffset);
+    entry(259, 3, 1, 1);
+    entry(262, 3, 1, 2);
+    entry(273, 4, 1, pixelOffset);
+    entry(277, 3, 1, 3);
+    entry(278, 4, 1, height);
+    entry(279, 4, 1, pixelBytes);
+    entry(282, 5, 1, xResolutionOffset);
+    entry(283, 5, 1, yResolutionOffset);
+    entry(284, 3, 1, 1);
+    entry(296, 3, 1, 2);
+    view.setUint32(cursor, 0, true);
+    [0, 2, 4].forEach((offset) => view.setUint16(bitsOffset + offset, 8, true));
+    view.setUint32(xResolutionOffset, Math.round(dpi), true);
+    view.setUint32(xResolutionOffset + 4, 1, true);
+    view.setUint32(yResolutionOffset, Math.round(dpi), true);
+    view.setUint32(yResolutionOffset + 4, 1, true);
+    let target = pixelOffset;
+    for (let index = 0; index < source.length; index += 4) {
+      const alpha = source[index + 3] / 255;
+      output[target++] = Math.round(source[index] * alpha + 255 * (1 - alpha));
+      output[target++] = Math.round(source[index + 1] * alpha + 255 * (1 - alpha));
+      output[target++] = Math.round(source[index + 2] * alpha + 255 * (1 - alpha));
+    }
+    return output;
+  }
+
+  function pdfString(value) {
+    return String(value || "").replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)").replace(/[\r\n]+/g, " ");
+  }
+
+  function pdfFromJpegs(pages, metadata = {}) {
+    if (!Array.isArray(pages) || !pages.length) throw new Error("PDF requires at least one page");
+    const objects = [null];
+    const pageIds = [];
+    const imageIds = [];
+    const contentIds = [];
+    pages.forEach(() => {
+      pageIds.push(objects.length); objects.push(null);
+      imageIds.push(objects.length); objects.push(null);
+      contentIds.push(objects.length); objects.push(null);
+    });
+    const pagesId = objects.length; objects.push(null);
+    const catalogId = objects.length; objects.push(null);
+    const infoId = objects.length; objects.push(null);
+
+    pages.forEach((page, index) => {
+      const jpeg = bytes(page.jpeg || page.data);
+      const dpi = Number(page.dpi) > 0 ? Number(page.dpi) : 300;
+      const widthPt = Number((page.width / dpi * 72).toFixed(4));
+      const heightPt = Number((page.height / dpi * 72).toFixed(4));
+      const content = bytes(`q\n${widthPt} 0 0 ${heightPt} 0 0 cm\n/Im0 Do\nQ\n`);
+      objects[pageIds[index]] = bytes(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${widthPt} ${heightPt}] /Resources << /XObject << /Im0 ${imageIds[index]} 0 R >> >> /Contents ${contentIds[index]} 0 R >>`);
+      objects[imageIds[index]] = concat([
+        bytes(`<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`),
+        jpeg,
+        bytes("\nendstream"),
+      ]);
+      objects[contentIds[index]] = concat([bytes(`<< /Length ${content.length} >>\nstream\n`), content, bytes("endstream")]);
+    });
+    objects[pagesId] = bytes(`<< /Type /Pages /Count ${pages.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] >>`);
+    objects[catalogId] = bytes(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+    objects[infoId] = bytes(`<< /Title (${pdfString(metadata.title)}) /Author (${pdfString(metadata.author || "FigureLab")}) /Subject (${pdfString(metadata.subject || "Scientific figure export")}) /Creator (FigureLab WB ${ENGINE_VERSION}) >>`);
+
+    const parts = [bytes("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n")];
+    const offsets = [0];
+    let offset = parts[0].length;
+    for (let id = 1; id < objects.length; id += 1) {
+      const object = concat([bytes(`${id} 0 obj\n`), objects[id], bytes("\nendobj\n")]);
+      offsets[id] = offset;
+      parts.push(object);
+      offset += object.length;
+    }
+    const xrefOffset = offset;
+    const xref = [`xref\n0 ${objects.length}\n`, "0000000000 65535 f \n"];
+    for (let id = 1; id < objects.length; id += 1) xref.push(`${String(offsets[id]).padStart(10, "0")} 00000 n \n`);
+    parts.push(bytes(xref.join("")));
+    parts.push(bytes(`trailer\n<< /Size ${objects.length} /Root ${catalogId} 0 R /Info ${infoId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`));
+    return concat(parts);
+  }
+
+  function xml(value) {
+    return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+  }
+
+  function excelColumn(index) {
+    let value = index + 1;
+    let name = "";
+    while (value) {
+      value -= 1;
+      name = String.fromCharCode(65 + (value % 26)) + name;
+      value = Math.floor(value / 26);
+    }
+    return name;
+  }
+
+  function worksheetXml(rows) {
+    const body = rows.map((row, rowIndex) => {
+      const cells = row.map((value, columnIndex) => {
+        const ref = `${excelColumn(columnIndex)}${rowIndex + 1}`;
+        if (typeof value === "number" && Number.isFinite(value)) return `<c r="${ref}"><v>${value}</v></c>`;
+        if (typeof value === "boolean") return `<c r="${ref}" t="b"><v>${value ? 1 : 0}</v></c>`;
+        return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xml(value)}</t></is></c>`;
+      }).join("");
+      return `<row r="${rowIndex + 1}">${cells}</row>`;
+    }).join("");
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`;
+  }
+
+  function xlsxWorkbook(sheets, metadata = {}) {
+    if (!Array.isArray(sheets) || !sheets.length) throw new Error("XLSX requires at least one sheet");
+    const usedNames = new Set();
+    const safeSheets = sheets.map((sheet, index) => {
+      const base = String(sheet.name || `Sheet${index + 1}`).replace(/[\\/*?:\[\]]/g, "_").slice(0, 31) || `Sheet${index + 1}`;
+      let name = base;
+      let suffix = 2;
+      while (usedNames.has(name.toLowerCase())) {
+        const tail = `_${suffix++}`;
+        name = base.slice(0, 31 - tail.length) + tail;
+      }
+      usedNames.add(name.toLowerCase());
+      return { name, rows: Array.isArray(sheet.rows) ? sheet.rows : [] };
+    });
+    const contentTypes = safeSheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("");
+    const workbookSheets = safeSheets.map((sheet, index) => `<sheet name="${xml(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("");
+    const workbookRels = safeSheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("");
+    const entries = [
+      { name: "[Content_Types].xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${contentTypes}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>` },
+      { name: "_rels/.rels", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>` },
+      { name: "xl/workbook.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${workbookSheets}</sheets></workbook>` },
+      { name: "xl/_rels/workbook.xml.rels", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${workbookRels}</Relationships>` },
+      { name: "docProps/core.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${xml(metadata.title || "FigureLab WB quantification")}</dc:title><dc:creator>FigureLab</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created></cp:coreProperties>` },
+      { name: "docProps/app.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>FigureLab</Application></Properties>` },
+    ];
+    safeSheets.forEach((sheet, index) => entries.push({ name: `xl/worksheets/sheet${index + 1}.xml`, data: worksheetXml(sheet.rows) }));
+    return zipStore(entries);
+  }
+
+  function boundedRoi(roi, width, height, label) {
+    const normalized = [roi?.x, roi?.y, roi?.w, roi?.h].map(Number);
+    if (normalized.some((value) => !Number.isFinite(value)) || normalized[2] < 1 || normalized[3] < 1) throw new Error(`${label} ROI is invalid`);
+    const [x, y, w, h] = normalized.map(Math.round);
+    if (x < 0 || y < 0 || x + w > width || y + h > height) throw new Error(`${label} ROI is outside the source image`);
+    return { x, y, w, h };
+  }
+
+  function roiStats(pixels, width, roi, endpoint) {
+    let sum = 0;
+    let sumSquares = 0;
+    let clipped = 0;
+    for (let y = roi.y; y < roi.y + roi.h; y += 1) {
+      for (let x = roi.x; x < roi.x + roi.w; x += 1) {
+        const value = pixels[y * width + x];
+        sum += value;
+        sumSquares += value * value;
+        if (value === endpoint) clipped += 1;
+      }
+    }
+    const count = roi.w * roi.h;
+    const mean = sum / count;
+    const variance = count > 1 ? Math.max(0, (sumSquares - sum * sum / count) / (count - 1)) : 0;
+    return { count, sum, mean, sd: Math.sqrt(variance), clipped, clippedFraction: clipped / count };
+  }
+
+  function quantifyRoiPair(input) {
+    const pixels = bytes(input.pixels);
+    const width = Number(input.width);
+    const height = Number(input.height);
+    if (pixels.length !== width * height) throw new Error("Grayscale byte length does not match dimensions");
+    const band = boundedRoi(input.band, width, height, "Band");
+    const background = boundedRoi(input.background, width, height, "Background");
+    if (band.w !== background.w || band.h !== background.h) throw new Error("Band and background ROI must have identical dimensions");
+    const overlaps = band.x < background.x + background.w && band.x + band.w > background.x && band.y < background.y + background.h && band.y + band.h > background.y;
+    if (overlaps) throw new Error("Band and background ROI must not overlap");
+    const polarity = input.polarity === "bright" ? "bright" : "dark";
+    const signalEndpoint = polarity === "bright" ? 255 : 0;
+    const backgroundEndpoint = polarity === "bright" ? 0 : 255;
+    const bandStats = roiStats(pixels, width, band, signalEndpoint);
+    const backgroundStats = roiStats(pixels, width, background, backgroundEndpoint);
+    const corrected = polarity === "bright"
+      ? bandStats.sum - backgroundStats.mean * bandStats.count
+      : backgroundStats.mean * bandStats.count - bandStats.sum;
+    const qc = [];
+    if (corrected <= 0) qc.push("POLARITY_OR_SIGNAL_INVALID");
+    if (bandStats.clipped) qc.push(bandStats.clippedFraction >= 0.01 ? "SIGNAL_SATURATION_HIGH" : "SIGNAL_ENDPOINT_PRESENT");
+    if (backgroundStats.clipped) qc.push(backgroundStats.clippedFraction >= 0.01 ? "BACKGROUND_CLIPPING_HIGH" : "BACKGROUND_ENDPOINT_PRESENT");
+    return {
+      polarity,
+      band,
+      background,
+      bandSum: bandStats.sum,
+      bandMean: bandStats.mean,
+      backgroundSum: backgroundStats.sum,
+      backgroundMean: backgroundStats.mean,
+      backgroundSd: backgroundStats.sd,
+      corrected,
+      signalClippedCount: bandStats.clipped,
+      signalClippedFraction: bandStats.clippedFraction,
+      backgroundClippedCount: backgroundStats.clipped,
+      backgroundClippedFraction: backgroundStats.clippedFraction,
+      qc,
+    };
+  }
+
+  function normalizeMeasurements(targets, loading, samples, controlGroup) {
+    if (!loading?.lanes || !Array.isArray(targets) || !Array.isArray(samples)) throw new Error("Quantification mapping is incomplete");
+    const rows = [];
+    targets.forEach((target) => {
+      target.lanes.forEach((measurement, index) => {
+        const sample = samples[index] || {};
+        const loadingMeasurement = loading.lanes[index];
+        const ratio = measurement?.corrected > 0 && loadingMeasurement?.corrected > 0
+          ? measurement.corrected / loadingMeasurement.corrected
+          : null;
+        rows.push({
+          targetKey: target.key,
+          target: target.name,
+          lane: index + 1,
+          sampleId: sample.sampleId || `Lane ${index + 1}`,
+          group: sample.group || "",
+          biologicalReplicate: sample.biologicalReplicate || index + 1,
+          technicalReplicate: sample.technicalReplicate || "",
+          excluded: Boolean(sample.excluded),
+          exclusionNote: sample.exclusionNote || "",
+          targetMeasurement: measurement,
+          loadingMeasurement,
+          ratio,
+          qc: [...(measurement?.qc || []), ...(loadingMeasurement?.qc || []), ...(ratio === null ? ["NORMALIZATION_INVALID"] : [])],
+        });
+      });
+    });
+
+    const technicalMeans = new Map();
+    rows.filter((row) => !row.excluded && row.ratio !== null).forEach((row) => {
+      const key = [row.targetKey, row.group, row.biologicalReplicate].join("\u001f");
+      const values = technicalMeans.get(key) || [];
+      values.push(row.ratio);
+      technicalMeans.set(key, values);
+    });
+    const biologicalValues = new Map([...technicalMeans].map(([key, values]) => [key, values.reduce((sum, value) => sum + value, 0) / values.length]));
+    const baselines = new Map();
+    targets.forEach((target) => {
+      const values = [...biologicalValues].filter(([key]) => key.startsWith(`${target.key}\u001f${controlGroup}\u001f`)).map(([, value]) => value);
+      baselines.set(target.key, values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null);
+    });
+    rows.forEach((row) => {
+      const key = [row.targetKey, row.group, row.biologicalReplicate].join("\u001f");
+      row.biologicalRatio = biologicalValues.get(key) ?? null;
+      row.controlMean = baselines.get(row.targetKey);
+      row.foldChange = row.biologicalRatio !== null && row.controlMean > 0 ? row.biologicalRatio / row.controlMean : null;
+      if (row.controlMean === null) row.qc.push("CONTROL_BASELINE_MISSING");
+    });
+    return rows;
+  }
+
+  function prismColumnTables(normalizedRows) {
+    const targets = new Map();
+    normalizedRows.filter((row) => !row.excluded && row.foldChange !== null).forEach((row) => {
+      const target = targets.get(row.targetKey) || { name: row.target, groups: new Map() };
+      if (!target.groups.has(row.group)) target.groups.set(row.group, new Map());
+      target.groups.get(row.group).set(String(row.biologicalReplicate), row.foldChange);
+      targets.set(row.targetKey, target);
+    });
+    return [...targets].map(([key, target]) => {
+      const groupNames = [...target.groups.keys()];
+      const replicates = [...new Set(groupNames.flatMap((group) => [...target.groups.get(group).keys()]))].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+      return {
+        key,
+        name: target.name,
+        rows: [groupNames, ...replicates.map((replicate) => groupNames.map((group) => target.groups.get(group).get(replicate) ?? ""))],
+      };
+    });
+  }
+
+  function mean(values) {
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  }
+
+  function sampleSd(values) {
+    if (values.length < 2) return null;
+    const average = mean(values);
+    return Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / (values.length - 1));
+  }
+
+  function summarizeNormalized(normalizedRows) {
+    const groups = new Map();
+    normalizedRows.filter((row) => !row.excluded && row.foldChange !== null).forEach((row) => {
+      const key = [row.targetKey, row.group].join("\u001f");
+      const item = groups.get(key) || { targetKey: row.targetKey, target: row.target, group: row.group, values: new Map() };
+      item.values.set(String(row.biologicalReplicate), row.foldChange);
+      groups.set(key, item);
+    });
+    return [...groups.values()].map((item) => {
+      const values = [...item.values.values()];
+      return { targetKey: item.targetKey, target: item.target, group: item.group, n: values.length, mean: mean(values), sd: sampleSd(values) };
+    });
+  }
+
+  function runIntegrityChecks(input) {
+    const errors = [];
+    const warnings = [];
+    const passes = [];
+    const rows = input.rows || [];
+    if (!rows.length) errors.push({ code: "NO_ROWS", message: "尚未添加任何条带行。" });
+    else passes.push("已添加条带行");
+    rows.forEach((row, index) => {
+      const label = row.name || `第 ${index + 1} 行`;
+      if (!row.hasSource) errors.push({ code: "SOURCE_MISSING", message: `${label} 缺少原始图片。` });
+      if (!row.sha256) warnings.push({ code: "HASH_MISSING", message: `${label} 尚无 SHA-256 校验值。` });
+      if (!row.mw) warnings.push({ code: "MW_MISSING", message: `${label} 未填写分子量。` });
+      if (row.brightness !== 100 || row.contrast !== 100 || row.invert) warnings.push({ code: "IMAGE_ADJUSTED", message: `${label} 使用了亮度、对比度或反相调整；请确认调整应用于整张图。` });
+      if (row.nonAdjacent && !(row.splices || []).length) errors.push({ code: "SPLICE_UNMARKED", message: `${label} 标记为非相邻泳道，但没有填写拼接边界。` });
+      if ((row.splices || []).some((boundary) => !Number.isInteger(boundary) || boundary < 1 || boundary >= input.laneCount)) errors.push({ code: "SPLICE_INVALID", message: `${label} 的拼接边界超出泳道范围。` });
+      if (row.signalClippedFraction > 0) warnings.push({ code: row.signalClippedFraction >= 0.01 ? "SATURATION_HIGH" : "SATURATION_PRESENT", message: `${label} 的已确认条带 ROI 中有 ${(row.signalClippedFraction * 100).toFixed(2)}% 端点像素。` });
+      if (row.backgroundClippedFraction > 0) warnings.push({ code: row.backgroundClippedFraction >= 0.01 ? "BACKGROUND_CLIPPING_HIGH" : "BACKGROUND_CLIPPING_PRESENT", message: `${label} 的已确认背景 ROI 中有 ${(row.backgroundClippedFraction * 100).toFixed(2)}% 端点像素。` });
+    });
+    const hashes = new Map();
+    rows.filter((row) => row.sha256).forEach((row) => {
+      const items = hashes.get(row.sha256) || [];
+      items.push(row.name);
+      hashes.set(row.sha256, items);
+    });
+    [...hashes.values()].filter((items) => items.length > 1).forEach((items) => warnings.push({ code: "SOURCE_REUSED", message: `多个条带行使用同一个原始文件：${items.join("、")}。请确认这是有意的。` }));
+    const loadingRows = rows.filter((row) => row.role === "loading");
+    if (rows.some((row) => row.role === "target") && !loadingRows.length) warnings.push({ code: "LOADING_CONTROL_MISSING", message: "尚未指定内参条带行。" });
+    rows.filter((row) => row.role === "target" && row.membraneId).forEach((row) => {
+      if (!loadingRows.some((loading) => loading.membraneId === row.membraneId)) warnings.push({ code: "MEMBRANE_MISMATCH", message: `${row.name} 没有同膜编号的内参；跨膜定量不应自动归一化。` });
+    });
+    if (Number(input.labelSizePt) < 7) warnings.push({ code: "FONT_TOO_SMALL", message: `按当前导出尺寸，标签约 ${Number(input.labelSizePt).toFixed(1)} pt，低于 7 pt。` });
+    if (Number(input.figureWidthCm) > Number(input.maxWidthCm || Infinity)) warnings.push({ code: "FIGURE_TOO_WIDE", message: `当前宽度 ${Number(input.figureWidthCm).toFixed(2)} cm 超过所选预设 ${Number(input.maxWidthCm).toFixed(2)} cm。` });
+    if (!errors.length) passes.push("未发现阻止导出的完整性错误");
+    if (!warnings.length) passes.push("未发现常规投稿警告");
+    return { errors, warnings, passes };
+  }
+
+  return {
+    ENGINE_VERSION,
+    bytes,
+    concat,
+    crc32,
+    zipStore,
+    encodeTiffRgba,
+    pdfFromJpegs,
+    xlsxWorkbook,
+    quantifyRoiPair,
+    normalizeMeasurements,
+    prismColumnTables,
+    summarizeNormalized,
+    runIntegrityChecks,
+  };
+});
