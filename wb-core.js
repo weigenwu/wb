@@ -5,7 +5,7 @@
 })(typeof globalThis === "undefined" ? this : globalThis, function () {
   "use strict";
 
-  const ENGINE_VERSION = "2.0.0";
+  const ENGINE_VERSION = "2.1.0";
   const encoder = new TextEncoder();
 
   function bytes(value) {
@@ -266,6 +266,259 @@
     return zipStore(entries);
   }
 
+  const SAMPLE_MAP_HEADERS = {
+    lane: ["lane", "laneno", "lanenumber", "泳道", "泳道号", "泳道编号"],
+    sampleId: ["sample", "sampleid", "样本", "样本id", "样本编号"],
+    laneLabel: ["lanelabel", "label", "displaylabel", "泳道标签", "显示标签"],
+    group: ["group", "condition", "treatment", "组别", "分组", "处理组"],
+    biologicalReplicate: ["biologicalreplicate", "biorep", "replicate", "生物学重复", "生物学重复编号", "生物重复", "生物重复编号"],
+    technicalReplicate: ["technicalreplicate", "techrep", "技术重复", "技术重复编号"],
+    excluded: ["excluded", "exclude", "omit", "isexcluded", "排除", "是否排除"],
+    exclusionNote: ["exclusionnote", "reason", "note", "notes", "备注", "说明", "排除原因"],
+  };
+
+  function normalizedHeader(value) {
+    return String(value || "").trim().toLowerCase().replace(/[\s_\-()（）/]+/g, "");
+  }
+
+  function delimitedRows(text, delimiter) {
+    const rows = [];
+    let row = [];
+    let cell = "";
+    let quoted = false;
+    for (let index = 0; index < text.length; index += 1) {
+      const character = text[index];
+      if (quoted) {
+        if (character === '"' && text[index + 1] === '"') { cell += '"'; index += 1; }
+        else if (character === '"') quoted = false;
+        else cell += character;
+      } else if (character === '"' && !cell.trim()) {
+        cell = "";
+        quoted = true;
+      } else if (character === delimiter) {
+        row.push(cell.trim());
+        cell = "";
+      } else if (character === "\n" || character === "\r") {
+        if (character === "\r" && text[index + 1] === "\n") index += 1;
+        row.push(cell.trim());
+        if (row.some(Boolean)) rows.push(row);
+        row = [];
+        cell = "";
+      } else cell += character;
+    }
+    if (quoted) throw new Error("样本表包含未闭合的引号");
+    row.push(cell.trim());
+    if (row.some(Boolean)) rows.push(row);
+    return rows;
+  }
+
+  function parseSampleMapTable(input) {
+    if (typeof input !== "string") throw new Error("样本表必须是文本");
+    const text = input.replace(/^\ufeff/, "").trim();
+    if (!text) throw new Error("样本表为空");
+    if (text.length > 262144) throw new Error("样本表不能超过 256 KB");
+    const firstLine = text.split(/\r?\n/, 1)[0];
+    const delimiter = firstLine.includes("\t") ? "\t" : ((firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ";" : ",");
+    const rows = delimitedRows(text, delimiter);
+    if (rows.length < 2) throw new Error("样本表至少需要表头和一行数据");
+    const aliases = new Map(Object.entries(SAMPLE_MAP_HEADERS).flatMap(([key, values]) => values.map((value) => [normalizedHeader(value), key])));
+    const columns = new Map();
+    rows[0].forEach((header, index) => {
+      const key = aliases.get(normalizedHeader(header));
+      if (!key) return;
+      if (columns.has(key)) throw new Error(`样本表有重复字段：${header}`);
+      columns.set(key, index);
+    });
+    [["lane", "泳道"], ["sampleId", "样本 ID"], ["group", "组别"], ["biologicalReplicate", "生物学重复"]].forEach(([key, label]) => {
+      if (!columns.has(key)) throw new Error(`样本表缺少必填字段：${label}`);
+    });
+    if (rows.length - 1 > 24) throw new Error("样本表最多支持 24 个泳道");
+    const value = (row, key) => columns.has(key) ? String(row[columns.get(key)] || "").trim() : "";
+    const parseExcluded = (raw, line) => {
+      const normalized = normalizedHeader(raw);
+      if (["", "0", "false", "no", "n", "否"].includes(normalized)) return false;
+      if (["1", "true", "yes", "y", "是", "排除"].includes(normalized)) return true;
+      throw new Error(`第 ${line} 行的排除值无法识别`);
+    };
+    const samples = rows.slice(1).map((row, index) => {
+      const line = index + 2;
+      const lane = Number(value(row, "lane"));
+      const sampleId = value(row, "sampleId");
+      const laneLabel = value(row, "laneLabel") || sampleId;
+      const group = value(row, "group");
+      const biologicalReplicate = value(row, "biologicalReplicate");
+      const technicalReplicate = value(row, "technicalReplicate");
+      const excluded = parseExcluded(value(row, "excluded"), line);
+      const exclusionNote = value(row, "exclusionNote");
+      if (!Number.isInteger(lane) || lane < 1 || lane > 24) throw new Error(`第 ${line} 行的泳道必须是 1–24 的整数`);
+      if (!sampleId) throw new Error(`第 ${line} 行缺少样本 ID`);
+      if (!group) throw new Error(`第 ${line} 行缺少组别`);
+      if (/[,，;；\r\n]/.test(group)) throw new Error(`第 ${line} 行的组别不能包含逗号、分号或换行`);
+      if (/[,，;；\r\n]/.test(laneLabel)) throw new Error(`第 ${line} 行的泳道标签不能包含逗号、分号或换行`);
+      if (!biologicalReplicate) throw new Error(`第 ${line} 行缺少生物学重复编号`);
+      if (sampleId.length > 80 || laneLabel.length > 40 || group.length > 40 || biologicalReplicate.length > 40 || technicalReplicate.length > 40 || exclusionNote.length > 200) throw new Error(`第 ${line} 行有字段超过长度限制`);
+      if (excluded && !exclusionNote) throw new Error(`第 ${line} 行已排除，但没有填写排除原因`);
+      return { lane, sampleId, laneLabel, group, biologicalReplicate, technicalReplicate, excluded, exclusionNote };
+    }).sort((left, right) => left.lane - right.lane);
+    samples.forEach((sample, index) => {
+      if (sample.lane !== index + 1) throw new Error(`泳道需要从 1 连续编号；缺少或重复第 ${index + 1} 道`);
+    });
+    const replicateGroups = new Map();
+    samples.forEach((sample) => {
+      const key = `${sample.group}\u001f${sample.biologicalReplicate}`;
+      const group = replicateGroups.get(key) || [];
+      group.push(sample);
+      replicateGroups.set(key, group);
+    });
+    replicateGroups.forEach((group) => {
+      if (group.length < 2) return;
+      if (group.some((sample) => !sample.technicalReplicate)) throw new Error(`${group[0].group} 的生物学重复 ${group[0].biologicalReplicate} 出现多次，请填写技术重复编号`);
+      if (new Set(group.map((sample) => sample.technicalReplicate)).size !== group.length) throw new Error(`${group[0].group} 的生物学重复 ${group[0].biologicalReplicate} 有重复的技术重复编号`);
+    });
+    return samples;
+  }
+
+  function windowAverages(values, size) {
+    const output = [];
+    let sum = 0;
+    values.forEach((value, index) => {
+      sum += value;
+      if (index >= size) sum -= values[index - size];
+      if (index >= size - 1) output.push(sum / size);
+    });
+    return output;
+  }
+
+  function suggestLaneRois(input) {
+    const pixels = bytes(input.pixels);
+    const width = Number(input.width);
+    const height = Number(input.height);
+    const laneCount = Number(input.laneCount);
+    if (!Number.isInteger(width) || !Number.isInteger(height) || pixels.length !== width * height) throw new Error("Grayscale byte length does not match dimensions");
+    if (!Number.isInteger(laneCount) || laneCount < 1 || laneCount > 24) throw new Error("Lane count must be between 1 and 24");
+    const sourceCrop = input.crop || { x: 0, y: 0, w: width, h: height };
+    const values = [sourceCrop.x, sourceCrop.y, sourceCrop.w, sourceCrop.h].map(Number);
+    if (values.some((value) => !Number.isFinite(value)) || values[0] < 0 || values[1] < 0 || values[2] <= 0 || values[3] <= 0 || values[0] + values[2] > width + .001 || values[1] + values[3] > height + .001) throw new Error("Crop is too small or outside the source image");
+    const crop = {
+      x: Math.max(0, Math.round(values[0])),
+      y: Math.max(0, Math.round(values[1])),
+      w: Math.min(width, Math.round(values[0] + values[2])) - Math.max(0, Math.round(values[0])),
+      h: Math.min(height, Math.round(values[1] + values[3])) - Math.max(0, Math.round(values[1])),
+    };
+    if (crop.w < laneCount * 3 || crop.h < 8) throw new Error("Crop is too small or outside the source image");
+    const polarity = input.polarity === "bright" ? "bright" : "dark";
+    const laneWidth = crop.w / laneCount;
+    const boxWidth = Math.max(2, Math.min(Math.floor(laneWidth), Math.round(laneWidth * .72)));
+    const boxHeight = Math.max(2, Math.min(crop.h - 4, Math.round(crop.h * .22)));
+    const profiles = Array.from({ length: laneCount }, (_, laneIndex) => {
+      const x = Math.max(crop.x, Math.min(crop.x + crop.w - boxWidth, Math.round(crop.x + laneIndex * laneWidth + (laneWidth - boxWidth) / 2)));
+      const rows = Array.from({ length: crop.h }, (_, offsetY) => {
+        let sum = 0;
+        for (let px = x; px < x + boxWidth; px += 1) sum += pixels[(crop.y + offsetY) * width + px];
+        return sum / boxWidth;
+      });
+      return { x, rows, windows: windowAverages(rows, boxHeight) };
+    });
+    const common = profiles[0].windows.map((_, index) => profiles.reduce((sum, profile) => sum + (polarity === "dark" ? 255 - profile.windows[index] : profile.windows[index]), 0) / laneCount);
+    let commonStart = 0;
+    for (let index = 1; index < common.length; index += 1) {
+      if (common[index] > common[commonStart]) commonStart = index;
+    }
+    const profileEdge = commonStart === 0 || commonStart === common.length - 1;
+    const searchRadius = Math.max(1, Math.floor(boxHeight / 2));
+    const lanes = profiles.map((profile, laneIndex) => {
+      let start = Math.max(0, commonStart - searchRadius);
+      let bestSignal = -Infinity;
+      const last = Math.min(profile.windows.length - 1, commonStart + searchRadius);
+      for (let index = start; index <= last; index += 1) {
+        const signal = polarity === "dark" ? 255 - profile.windows[index] : profile.windows[index];
+        if (signal > bestSignal) { bestSignal = signal; start = index; }
+      }
+      const band = { x: profile.x, y: crop.y + start, w: boxWidth, h: boxHeight };
+      const gap = 2;
+      const candidateStarts = [];
+      const minimum = Math.max(0, start - boxHeight * 2 - gap);
+      const maximum = Math.min(profile.windows.length - 1, start + boxHeight * 2 + gap);
+      for (let index = minimum; index <= maximum; index += 1) {
+        if (index + boxHeight + gap <= start || index >= start + boxHeight + gap) candidateStarts.push(index);
+      }
+      if (!candidateStarts.length) throw new Error(`Lane ${laneIndex + 1} has no non-overlapping local background region`);
+      const backgroundStart = candidateStarts.reduce((best, index) => {
+        const signal = polarity === "dark" ? 255 - profile.windows[index] : profile.windows[index];
+        const bestValue = polarity === "dark" ? 255 - profile.windows[best] : profile.windows[best];
+        return signal < bestValue ? index : best;
+      }, candidateStarts[0]);
+      const background = { x: profile.x, y: crop.y + backgroundStart, w: boxWidth, h: boxHeight };
+      const measurement = quantifyRoiPair({ pixels, width, height, band, background, polarity });
+      const contrastZ = polarity === "dark"
+        ? (measurement.backgroundMean - measurement.bandMean) / Math.max(measurement.backgroundSd, 1)
+        : (measurement.bandMean - measurement.backgroundMean) / Math.max(measurement.backgroundSd, 1);
+      const qc = [...measurement.qc];
+      if (profileEdge) qc.push("ROI_PROFILE_EDGE_CANDIDATE");
+      if (!(measurement.corrected > 0) || contrastZ < 1.5) qc.push("ROI_SIGNAL_LOW_CONFIDENCE");
+      else if (contrastZ < 3) qc.push("ROI_SIGNAL_REVIEW");
+      return { band, background, contrastZ, qc: [...new Set(qc)] };
+    });
+    const warnings = lanes.flatMap((lane, index) => lane.qc.length ? [{ lane: index + 1, codes: lane.qc }] : []);
+    const status = lanes.some((lane) => lane.qc.includes("ROI_SIGNAL_LOW_CONFIDENCE")) ? "low"
+      : lanes.some((lane) => lane.qc.length) ? "review" : "clear";
+    return { lanes, status, warnings, method: "row-contrast-v1" };
+  }
+
+  function assessExposureSeries(input) {
+    if (!Array.isArray(input) || input.length < 2 || input.length > 8) throw new Error("Exposure series must contain 2–8 images");
+    const series = input.map((exposure, index) => {
+      const time = Number(exposure.time);
+      if (!Number.isFinite(time) || time <= 0) throw new Error(`Exposure ${index + 1} time must be positive`);
+      if (!Array.isArray(exposure.lanes) || !exposure.lanes.length) throw new Error(`Exposure ${index + 1} has no lane measurements`);
+      return { ...exposure, time };
+    }).sort((left, right) => left.time - right.time);
+    if (new Set(series.map((exposure) => exposure.time)).size !== series.length) throw new Error("Exposure times must be unique");
+    const laneCount = series[0].lanes.length;
+    if (series.some((exposure) => exposure.lanes.length !== laneCount)) throw new Error("Exposure lane counts do not match");
+    const lanes = Array.from({ length: laneCount }, (_, index) => {
+      const points = series.map((exposure) => ({
+        time: exposure.time,
+        corrected: Number(exposure.lanes[index].corrected),
+        clippedFraction: Number(exposure.lanes[index].signalClippedFraction || 0),
+        signalClippedFraction: Number(exposure.lanes[index].signalClippedFraction || 0),
+        backgroundClippedFraction: Number(exposure.lanes[index].backgroundClippedFraction || 0),
+      }));
+      const codes = [];
+      if (points.some((point) => !Number.isFinite(point.corrected) || point.corrected <= 0)) codes.push("NON_POSITIVE_SIGNAL");
+      if (points.some((point) => point.clippedFraction >= .01)) codes.push("SATURATION_HIGH");
+      if (points.some((point) => point.backgroundClippedFraction >= .01)) codes.push("BACKGROUND_CLIPPING_HIGH");
+      if (points.some((point) => point.signalClippedFraction > 0 && point.signalClippedFraction < .01)) codes.push("SIGNAL_ENDPOINT_PRESENT");
+      if (points.some((point) => point.backgroundClippedFraction > 0 && point.backgroundClippedFraction < .01)) codes.push("BACKGROUND_ENDPOINT_PRESENT");
+      const monotonic = points.every((point, pointIndex) => pointIndex === 0 || point.corrected > points[pointIndex - 1].corrected);
+      if (!monotonic) codes.push("NON_MONOTONIC_RESPONSE");
+      const xMean = mean(points.map((point) => point.time));
+      const yMean = mean(points.map((point) => point.corrected));
+      const denominator = points.reduce((sum, point) => sum + (point.time - xMean) ** 2, 0);
+      const slope = denominator ? points.reduce((sum, point) => sum + (point.time - xMean) * (point.corrected - yMean), 0) / denominator : 0;
+      const intercept = yMean - slope * xMean;
+      const residual = points.reduce((sum, point) => sum + (point.corrected - (intercept + slope * point.time)) ** 2, 0);
+      const total = points.reduce((sum, point) => sum + (point.corrected - yMean) ** 2, 0);
+      const r2 = total ? Math.max(0, 1 - residual / total) : 0;
+      const rates = points.map((point) => point.corrected / point.time);
+      const rateMean = mean(rates);
+      const responseCv = rateMean > 0 ? (sampleSd(rates) || 0) / rateMean : Infinity;
+      if (series.length < 3) codes.push("TOO_FEW_EXPOSURES");
+      else {
+        if (r2 < .98) codes.push("R2_LOW");
+        if (responseCv > .15) codes.push("RESPONSE_RATE_CV_HIGH");
+      }
+      const invalid = codes.includes("NON_POSITIVE_SIGNAL");
+      const blockingCodes = codes.filter((code) => !["SIGNAL_ENDPOINT_PRESENT", "BACKGROUND_ENDPOINT_PRESENT"].includes(code));
+      const status = invalid ? "invalid" : series.length < 3 ? "insufficient" : blockingCodes.length ? "review" : "consistent";
+      return { lane: input[0].lanes[index].lane || index + 1, slope, intercept, r2, responseCv, monotonic, status, codes, points };
+    });
+    const status = lanes.some((lane) => lane.status === "invalid") ? "invalid"
+      : series.length < 3 ? "insufficient"
+        : lanes.every((lane) => lane.status === "consistent") ? "consistent" : "review";
+    return { status, lanes, exposureCount: series.length, thresholds: { minimumPoints: 3, minimumR2: .98, maximumResponseCv: .15, saturationFraction: .01 } };
+  }
+
   function boundedRoi(roi, width, height, label) {
     const normalized = [roi?.x, roi?.y, roi?.w, roi?.h].map(Number);
     if (normalized.some((value) => !Number.isFinite(value)) || normalized[2] < 1 || normalized[3] < 1) throw new Error(`${label} ROI is invalid`);
@@ -472,6 +725,9 @@
     encodeTiffRgba,
     pdfFromJpegs,
     xlsxWorkbook,
+    parseSampleMapTable,
+    suggestLaneRois,
+    assessExposureSeries,
     quantifyRoiPair,
     normalizeMeasurements,
     prismColumnTables,

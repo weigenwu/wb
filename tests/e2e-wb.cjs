@@ -59,9 +59,13 @@ async function waitForServer(url) {
   const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "figurelab-wb-"));
   const loading = path.join(fixtureDir, "Loading_Control.tif");
   const target = path.join(fixtureDir, "Target_Protein.tif");
+  const exposureShort = path.join(fixtureDir, "Loading_short.tif");
+  const exposureLong = path.join(fixtureDir, "Loading_long.tif");
   const loadingBytes = grayTiff(300, 100, [120, 120, 120]);
   fs.writeFileSync(loading, loadingBytes);
   fs.writeFileSync(target, grayTiff(300, 100, [80, 160, 240]));
+  fs.writeFileSync(exposureShort, grayTiff(300, 100, [70, 70, 70]));
+  fs.writeFileSync(exposureLong, grayTiff(300, 100, [220, 220, 220]));
   const legacyProject = path.join(fixtureDir, "legacy-v1.wb-project");
   fs.writeFileSync(legacyProject, JSON.stringify({
     kind: "blotboard-project",
@@ -122,18 +126,43 @@ async function waitForServer(url) {
     await page.locator("#openQuant").click();
     await page.locator("#quantDialog").waitFor({ state: "visible" });
     assert.equal(await page.locator("#quantRow option").count(), 2);
+    await page.locator("#sampleMapImport summary").click();
+    await page.locator("#sampleMapText").fill("泳道\t样本ID\t组别\t生物学重复\t排除\t排除原因\n1\tC1\tControl\t1\t否\t\n2\tD1\tDrug\t1\t否\t\n3\tD2\tDrug\t2\t是\t图像伪影");
+    await page.locator("#applySampleMapText").click();
+    assert.equal(await page.locator('#sampleMapBody [data-map="sampleId"]').nth(0).inputValue(), "C1");
+    assert.equal(await page.locator('#sampleMapBody [data-map="group"]').nth(2).inputValue(), "Drug");
+    assert.match(await page.locator("#groupInput").inputValue(), /Control × 1, Drug × 2/);
+    await page.locator("#sampleMapText").fill("lane,sample_id,biological_replicate\n1,Bad,1");
+    await page.locator("#applySampleMapText").click();
+    assert.equal(await page.locator('#sampleMapBody [data-map="sampleId"]').nth(0).inputValue(), "C1", "invalid import must not replace the existing map");
+    const thirdGroup = page.locator('#sampleMapBody [data-map="group"]').nth(2);
+    await thirdGroup.selectOption("Control");
+    assert.match(await page.locator("#groupInput").inputValue(), /Control × 1, Drug × 1, Control × 1/, "manual map edits must keep figure grouping synchronized");
+    await thirdGroup.selectOption("Drug");
+    assert.match(await page.locator("#groupInput").inputValue(), /Control × 1, Drug × 2/);
     const loadingKey = await page.locator("#quantRow option").nth(0).getAttribute("value");
     const targetKey = await page.locator("#quantRow option").nth(1).getAttribute("value");
     await page.locator("#quantRow").selectOption(targetKey);
     await page.locator("#quantMembrane").fill("membrane-1");
     await page.locator("#quantPolarity").selectOption("bright");
-    await page.locator("#initializeRois").click();
+    await page.locator("#suggestRois").click();
+    assert.match(await page.locator("#quantStatus").textContent(), /信号建议/);
     await page.locator("#quantMapLocked").check();
+    assert.ok(await page.locator('#sampleMapBody [data-map="sampleId"]').first().isDisabled(), "locked sample map must be read-only");
+    await page.locator('[data-close-dialog="quantDialog"]').click();
+    await page.locator("#applyGroups").click();
+    await page.locator("#compactPreset").click();
+    await page.locator("#openQuant").click();
+    await page.locator("#quantDialog").waitFor({ state: "visible" });
+    assert.equal(await page.locator('#sampleMapBody [data-map="sampleId"]').first().inputValue(), "C1", "no-op layout actions must preserve detailed sample metadata");
+    assert.ok(await page.locator("#quantMapLocked").isChecked(), "no-op layout actions must preserve the mapping lock");
+    assert.ok(await page.locator('#sampleMapBody [data-map="excluded"]').nth(2).isChecked(), "no-op layout actions must preserve exclusions");
+    await page.locator("#quantRow").selectOption(targetKey);
     await page.locator("#calculateQuant").click();
     await page.locator("#quantRow").selectOption(loadingKey);
     await page.locator("#quantMembrane").fill("membrane-1");
     await page.locator("#quantPolarity").selectOption("bright");
-    await page.locator("#initializeRois").click();
+    await page.locator("#suggestRois").click();
     await page.locator("#calculateQuant").click();
     try {
       await page.waitForFunction(() => document.querySelectorAll("#quantResults tbody tr").length === 3, null, { timeout: 10_000 });
@@ -142,13 +171,64 @@ async function waitForServer(url) {
       throw error;
     }
 
+    await page.locator("#exposureCheck summary").click();
+    await page.locator("#exposureFiles").setInputFiles([exposureShort, exposureLong]);
+    assert.equal(await page.locator("#exposureFileTable tbody tr").count(), 3);
+    const exposureTimes = page.locator("#exposureFileTable [data-exposure-time]");
+    await exposureTimes.nth(0).fill("2");
+    await exposureTimes.nth(1).fill("1");
+    await exposureTimes.nth(2).fill("4");
+    await page.locator("#exposureGeometryConfirmed").check();
+    await page.locator("#runExposureCheck").click();
+    await page.waitForFunction(() => document.querySelector("#exposureResults")?.textContent.includes("符合预筛查阈值"));
+    assert.equal(await page.locator("#exposureResults tbody tr").count(), 2);
+    const exposureDownload = page.waitForEvent("download");
+    await page.locator("#downloadExposureReport").click();
+    const exposureFile = await exposureDownload;
+    assert.match(exposureFile.suggestedFilename(), /exposure-check\.csv$/);
+    const exposureCsv = fs.readFileSync(await exposureFile.path(), "utf8");
+    assert.match(exposureCsv, /Loading control/, "exposure report must retain the protein identity snapshot");
+    assert.match(exposureCsv, /Loading_short\.tif/);
+    assert.match(exposureCsv, /Loading_long\.tif/);
+    assert.match(exposureCsv, /background_clipped_fraction/);
+    assert.match(exposureCsv, /same_membrane_same_view_confirmed/);
+    assert.match(exposureCsv, /EXCLUDED_BY_SAMPLE_MAP/);
+    assert.match(exposureCsv, /图像伪影/);
+    await page.locator("#quantMapLocked").uncheck();
+    assert.ok(await page.locator("#downloadExposureReport").isDisabled(), "unlocking the sample map must invalidate an exposure report");
+    await page.locator("#quantMapLocked").check();
+
+    await page.evaluate(() => {
+      const original = File.prototype.arrayBuffer;
+      File.prototype.arrayBuffer = function delayedExposureRead() {
+        if (/Loading_(short|long)/.test(this.name)) return new Promise((resolve, reject) => setTimeout(() => original.call(this).then(resolve, reject), 120));
+        return original.call(this);
+      };
+    });
+    await page.locator("#runExposureCheck").click();
+    await page.waitForTimeout(25);
+    await page.locator("#quantMapLocked").uncheck();
+    await page.waitForFunction(() => document.querySelector("#runExposureCheck")?.textContent === "运行响应预筛查");
+    assert.ok(await page.locator("#downloadExposureReport").isDisabled(), "an exposure run must discard results when inputs change asynchronously");
+    assert.match(await page.locator("#exposureResults").textContent(), /尚未运行检查/);
+    await page.locator("#quantMapLocked").check();
+
     const prismDownload = page.waitForEvent("download");
     await page.locator("#exportPrism").click();
     const prismFile = await prismDownload;
     assert.match(prismFile.suggestedFilename(), /prism-column-data\.zip$/);
     const prismBytes = fs.readFileSync(await prismFile.path());
     assert.equal(prismBytes.subarray(0, 2).toString("ascii"), "PK");
-    assert.ok(prismBytes.includes(Buffer.from('"Control","Group 1","Group 2"\r\n')), "Prism CSV must start with clean group columns");
+    assert.ok(prismBytes.includes(Buffer.from('"Control","Drug"\r\n')), "Prism CSV must start with clean group columns");
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileQuant = await page.evaluate(() => {
+      const dialog = document.querySelector("#quantDialog").getBoundingClientRect();
+      return { pageWidth: document.documentElement.scrollWidth, viewportWidth: innerWidth, dialogLeft: dialog.left, dialogRight: dialog.right };
+    });
+    assert.ok(mobileQuant.pageWidth <= mobileQuant.viewportWidth + 1, "mobile quantification dialog must not overflow the page");
+    assert.ok(mobileQuant.dialogLeft >= 0 && mobileQuant.dialogRight <= mobileQuant.viewportWidth + 1, "mobile quantification dialog must stay inside the viewport");
+    if (process.env.E2E_QUANT_SCREENSHOT) await page.screenshot({ path: process.env.E2E_QUANT_SCREENSHOT, fullPage: false });
+    await page.setViewportSize({ width: 1280, height: 720 });
     await page.locator('[data-close-dialog="quantDialog"]').click();
 
     const tiffDownload = page.waitForEvent("download");
@@ -189,10 +269,18 @@ async function waitForServer(url) {
     assert.equal(project.version, 2);
     assert.equal(project.rows.length, 2);
     assert.equal(project.panels.length, 1);
+    assert.equal(project.settings.quant.rois[targetKey].method, "row-contrast-v1");
+    assert.equal(project.settings.quant.rois[loadingKey].method, "row-contrast-v1");
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#newProject").click();
     await page.locator("#projectFile").setInputFiles(projectPath);
     await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 2);
+    await page.locator("#openQuant").click();
+    await page.locator("#quantDialog").waitFor({ state: "visible" });
+    assert.equal(await page.locator('#sampleMapBody [data-map="sampleId"]').first().inputValue(), "C1", "v2 import must restore the sample map");
+    assert.ok(await page.locator("#quantMapLocked").isChecked(), "v2 import must restore the mapping lock");
+    assert.match(await page.locator("#quantStatus").textContent(), /信号建议/, "v2 import must restore ROI provenance");
+    await page.locator('[data-close-dialog="quantDialog"]').click();
     await page.locator("#openPanels").click();
     assert.equal(await page.locator("#panelGrid .panel-card").count(), 2);
     await page.locator('[data-close-dialog="panelDialog"]').click();
@@ -221,7 +309,7 @@ async function waitForServer(url) {
     assert.ok(mobileShell.studioVisible, "#studio must land below the sticky header and inside the viewport");
     if (process.env.E2E_SCREENSHOT) await page.screenshot({ path: process.env.E2E_SCREENSHOT, fullPage: true });
     assert.deepEqual(errors, []);
-    console.log("WB browser E2E passed: TIFF upload, raw quantification, Prism, panel, TIFF and compliance package.");
+    console.log("WB browser E2E passed: sample-map import, assisted ROI, exposure QC, TIFF quantification, Prism and compliance package.");
   } finally {
     if (browser) await browser.close();
     server.kill();
