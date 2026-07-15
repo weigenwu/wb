@@ -1,7 +1,7 @@
 {
   "name": "实验室工作台 · WB 组图与灰度",
   "short_name": "WB 工作台",
-  "description": "在浏览器本地完成 Western blot 组图、定量与投稿导出。",
+  "description": "在浏览器本地完成 Western blot 组图、样本映射、ROI 辅助、定量与曝光 QC。",
   "lang": "zh-CN",
   "start_url": "./#studio",
   "scope": "./",

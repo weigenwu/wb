@@ -97,6 +97,116 @@ function testXlsx() {
   assert.match(sheet, /Control/);
 }
 
+function testSampleMapImport() {
+  const tsv = "\ufeff泳道\t样本ID\t泳道标签\t组别\t生物学重复\t技术重复\t排除\t排除原因\n"
+    + "2\tC2\tControl 2\tControl\t2\t\t否\t\n"
+    + "1\tC1\tControl 1\tControl\t1\t\t0\t\n"
+    + "3\tD1\tDrug 1\tDrug\t1\t\t是\t样本污染";
+  const samples = core.parseSampleMapTable(tsv);
+  assert.deepEqual(samples.map(({ lane, sampleId, group, excluded }) => ({ lane, sampleId, group, excluded })), [
+    { lane: 1, sampleId: "C1", group: "Control", excluded: false },
+    { lane: 2, sampleId: "C2", group: "Control", excluded: false },
+    { lane: 3, sampleId: "D1", group: "Drug", excluded: true },
+  ]);
+  assert.equal(samples[2].exclusionNote, "样本污染");
+
+  const quoted = core.parseSampleMapTable('lane,sample_id,lane_label,group,biological_replicate,technical_replicate,excluded,exclusion_note\n1,"Sample, A",Sample A,Control,1,,,\n2,Sample B,Sample B,Drug,1,,,');
+  assert.equal(quoted[0].sampleId, "Sample, A");
+  assert.throws(() => core.parseSampleMapTable("lane,sample,group,replicate\n1,A,C,1\n1,B,C,2"), /连续编号/);
+  assert.throws(() => core.parseSampleMapTable("lane,sample,group,replicate,excluded,note\n1,A,C,1,maybe,"), /排除值/);
+  assert.throws(() => core.parseSampleMapTable("lane,sample,group,replicate,excluded,note\n1,A,C,1,yes,"), /排除原因/);
+  assert.throws(() => core.parseSampleMapTable("lane,sample,group\n1,A,C"), /生物学重复/);
+  assert.throws(() => core.parseSampleMapTable("lane,sample,sample_id,group,replicate\n1,A,A,C,1"), /重复字段/);
+  assert.throws(() => core.parseSampleMapTable('lane,sample,group,replicate\n1,A,"Control, baseline",1'), /组别不能包含/);
+  assert.throws(() => core.parseSampleMapTable('lane,sample,lane_label,group,replicate\n1,A,"Lane, 1",Control,1'), /泳道标签不能包含/);
+  assert.throws(() => core.parseSampleMapTable('lane,sample,group,replicate\n1,"Sample, A",Control,1'), /泳道标签不能包含/);
+}
+
+function syntheticBands({ width = 300, height = 100, background = 200, bandValues = [80, 110, 140], bright = false } = {}) {
+  const pixels = new Uint8Array(width * height).fill(background);
+  const laneWidth = width / bandValues.length;
+  bandValues.forEach((value, lane) => {
+    const offset = lane === 1 ? 2 : lane === 2 ? -2 : 0;
+    const yStart = 60 + offset;
+    for (let y = yStart; y < yStart + 22; y += 1) {
+      for (let x = Math.floor(lane * laneWidth + laneWidth * .08); x < Math.ceil((lane + 1) * laneWidth - laneWidth * .08); x += 1) pixels[y * width + x] = value;
+    }
+  });
+  return { pixels, width, height, polarity: bright ? "bright" : "dark" };
+}
+
+function testRoiSuggestions() {
+  const dark = syntheticBands();
+  const suggested = core.suggestLaneRois({ ...dark, laneCount: 3 });
+  assert.equal(suggested.method, "row-contrast-v1");
+  assert.equal(suggested.lanes.length, 3);
+  suggested.lanes.forEach(({ band, background, contrastZ }) => {
+    assert.equal(band.w, background.w);
+    assert.equal(band.h, background.h);
+    assert.ok(band.y <= 70 && band.y + band.h >= 70, "suggested band should cover the synthetic signal");
+    assert.ok(band.x >= 0 && band.y >= 0 && band.x + band.w <= dark.width && band.y + band.h <= dark.height);
+    assert.ok(background.y + background.h <= band.y || band.y + band.h <= background.y);
+    assert.ok(contrastZ >= 3);
+  });
+  assert.equal(suggested.status, "clear");
+
+  const bright = syntheticBands({ background: 20, bandValues: [220, 210, 200], bright: true });
+  assert.equal(core.suggestLaneRois({ ...bright, laneCount: 3 }).status, "clear");
+  const flat = core.suggestLaneRois({ pixels: new Uint8Array(300 * 100).fill(200), width: 300, height: 100, laneCount: 3, polarity: "dark" });
+  assert.equal(flat.status, "low");
+  assert.ok(flat.lanes.every((lane) => lane.qc.includes("ROI_SIGNAL_LOW_CONFIDENCE")));
+  assert.equal(core.suggestLaneRois({ ...dark, crop: { x: .4, y: .4, w: 299.6, h: 99.6 }, laneCount: 3 }).lanes.length, 3);
+  assert.equal(core.suggestLaneRois({ pixels: new Uint8Array(3 * 200000).fill(200), width: 3, height: 200000, laneCount: 1 }).lanes.length, 1);
+}
+
+function testExposureSeries() {
+  const linear = core.assessExposureSeries([
+    { time: 1, lanes: [{ corrected: 100, signalClippedFraction: 0 }] },
+    { time: 2, lanes: [{ corrected: 200, signalClippedFraction: 0 }] },
+    { time: 4, lanes: [{ corrected: 400, signalClippedFraction: 0 }] },
+  ]);
+  assert.equal(linear.status, "consistent");
+  assert.equal(linear.lanes[0].r2, 1);
+  assert.equal(linear.lanes[0].responseCv, 0);
+
+  const plateau = core.assessExposureSeries([
+    { time: 1, lanes: [{ corrected: 100, signalClippedFraction: 0 }] },
+    { time: 2, lanes: [{ corrected: 180, signalClippedFraction: 0 }] },
+    { time: 4, lanes: [{ corrected: 185, signalClippedFraction: .02 }] },
+  ]);
+  assert.equal(plateau.status, "review");
+  assert.ok(plateau.lanes[0].codes.includes("SATURATION_HIGH"));
+  assert.ok(plateau.lanes[0].codes.includes("RESPONSE_RATE_CV_HIGH"));
+  const clippedBackground = core.assessExposureSeries([
+    { time: 1, lanes: [{ corrected: 100, backgroundClippedFraction: 1 }] },
+    { time: 2, lanes: [{ corrected: 200, backgroundClippedFraction: 1 }] },
+    { time: 4, lanes: [{ corrected: 400, backgroundClippedFraction: 1 }] },
+  ]);
+  assert.equal(clippedBackground.status, "review");
+  assert.ok(clippedBackground.lanes[0].codes.includes("BACKGROUND_CLIPPING_HIGH"));
+  const endpointPresent = core.assessExposureSeries([
+    { time: 1, lanes: [{ corrected: 100, signalClippedFraction: .005 }] },
+    { time: 2, lanes: [{ corrected: 200, signalClippedFraction: .005 }] },
+    { time: 4, lanes: [{ corrected: 400, signalClippedFraction: .005 }] },
+  ]);
+  assert.equal(endpointPresent.status, "consistent", "endpoint fractions below the declared 1% threshold are non-blocking");
+  assert.ok(endpointPresent.lanes[0].codes.includes("SIGNAL_ENDPOINT_PRESENT"));
+  const invalid = core.assessExposureSeries([
+    { time: 1, lanes: [{ corrected: 0 }, { corrected: 100 }] },
+    { time: 2, lanes: [{ corrected: 10 }, { corrected: 200 }] },
+    { time: 4, lanes: [{ corrected: 20 }, { corrected: 400 }] },
+  ]);
+  assert.equal(invalid.status, "invalid");
+  assert.equal(invalid.lanes[0].status, "invalid");
+  assert.equal(core.assessExposureSeries([
+    { time: 1, lanes: [{ corrected: 100 }] },
+    { time: 2, lanes: [{ corrected: 200 }] },
+  ]).status, "insufficient");
+  assert.throws(() => core.assessExposureSeries([{ time: 1, lanes: [{ corrected: 1 }] }, { time: 1, lanes: [{ corrected: 2 }] }]), /unique/);
+  assert.throws(() => core.assessExposureSeries([{ time: 0, lanes: [{ corrected: 1 }] }, { time: 1, lanes: [{ corrected: 2 }] }]), /positive/);
+  assert.throws(() => core.assessExposureSeries([{ time: 1, lanes: [{ corrected: 1 }] }, { time: 2, lanes: [{ corrected: 2 }, { corrected: 3 }] }]), /lane counts/);
+}
+
 function testDarkAndBrightRois() {
   const dark = core.quantifyRoiPair({
     pixels: Uint8Array.of(20, 30, 200, 200, 20, 30, 200, 200),
@@ -204,7 +314,10 @@ function testPwaShell() {
   assert.ok(manifest.icons.some(({ sizes }) => sizes === "any"));
   assert.match(html, /rel="manifest" href="\.\/manifest\.webmanifest"/);
   assert.match(html, /navigator\.serviceWorker\.register\("\.\/sw\.js"\)/);
-  assert.ok(fs.readFileSync(path.join(root, "sw.js"), "utf8").includes("./wb-core.js"));
+  const worker = fs.readFileSync(path.join(root, "sw.js"), "utf8");
+  assert.ok(worker.includes("./wb-core.js"));
+  assert.ok(worker.includes("figurelab-wb-v2.1.0"));
+  ["sampleMapText", "suggestRois", "exposureCheck", "downloadExposureReport"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
 }
 
 function testUnifiedSuiteShell() {
@@ -226,6 +339,9 @@ function testUnifiedSuiteShell() {
   testTiff,
   testPdf,
   testXlsx,
+  testSampleMapImport,
+  testRoiSuggestions,
+  testExposureSeries,
   testDarkAndBrightRois,
   testNormalizationAndPrism,
   testQc,
@@ -236,4 +352,4 @@ function testUnifiedSuiteShell() {
   console.log(`✓ ${test.name}`);
 });
 
-console.log("WB core and PWA checks passed.");
+console.log("WB core, assay workflow and PWA checks passed.");
