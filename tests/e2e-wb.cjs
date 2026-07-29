@@ -102,6 +102,17 @@ async function waitForServer(url) {
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#newProject").click();
     await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 0);
+    await page.locator("#groupInput").fill("NK × 2, 231WT × 4, 231OE × 4");
+    await page.locator("#laneLabelInput").fill("NK, NK+H, WT, WT+H, WT+NK, WT+H+NK, OE, OE+H, OE+NK, OE+H+NK");
+    await page.locator("#footerLabel").fill("MDA-MB-231");
+    await page.locator("#applyGroups").click();
+    await page.waitForFunction(() => document.querySelector("#figureCanvas")?.getAttribute("aria-label")?.includes("10 个泳道"));
+    assert.ok(await page.locator("#showGroupBrackets").isChecked(), "compact WB figures should default to bottom sample-source grouping");
+    assert.match(await page.locator("#previewStatus").textContent(), /10 个样本/);
+    assert.equal(await page.locator("#footerLabel").inputValue(), "MDA-MB-231");
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#newProject").click();
+    await page.waitForFunction(() => document.querySelector("#groupInput")?.value.includes("Control × 1"));
     await page.locator("#multiFile").setInputFiles([loading, target]);
     await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 2);
 
@@ -266,7 +277,8 @@ async function waitForServer(url) {
     assert.match(projectFile.suggestedFilename(), /project\.wb-project$/);
     const projectPath = await projectFile.path();
     const project = JSON.parse(fs.readFileSync(projectPath, "utf8"));
-    assert.equal(project.version, 2);
+    assert.equal(project.version, 3);
+    assert.equal(project.settings.showGroupBrackets, true);
     assert.equal(project.rows.length, 2);
     assert.equal(project.panels.length, 1);
     assert.equal(project.settings.quant.rois[targetKey].method, "row-contrast-v1");
