@@ -107,9 +107,14 @@ async function waitForServer(url) {
     await page.locator("#footerLabel").fill("MDA-MB-231");
     await page.locator("#applyGroups").click();
     await page.waitForFunction(() => document.querySelector("#figureCanvas")?.getAttribute("aria-label")?.includes("10 个泳道"));
-    assert.ok(await page.locator("#showGroupBrackets").isChecked(), "compact WB figures should default to bottom sample-source grouping");
+    assert.ok(await page.locator("#showGroupBrackets").isChecked(), "compact WB figures should default to top sample-source grouping");
     assert.match(await page.locator("#previewStatus").textContent(), /10 个样本/);
     assert.equal(await page.locator("#footerLabel").inputValue(), "MDA-MB-231");
+    const groupedCanvasHeight = await page.locator("#figureCanvas").evaluate((canvas) => canvas.height);
+    await page.locator("#showGroupBrackets").uncheck();
+    await page.waitForFunction((height) => document.querySelector("#figureCanvas")?.height < height, groupedCanvasHeight);
+    await page.locator("#showGroupBrackets").check();
+    await page.waitForFunction((height) => document.querySelector("#figureCanvas")?.height === height, groupedCanvasHeight);
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#newProject").click();
     await page.waitForFunction(() => document.querySelector("#groupInput")?.value.includes("Control × 1"));

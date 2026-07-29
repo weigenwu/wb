@@ -602,9 +602,9 @@
             <label class="caption" for="footerLabel" style="margin-top:14px">底部说明 / 细胞系</label>
             <input id="footerLabel" type="text" maxlength="40" value="Cell line" placeholder="例如 Cell line">
             <div class="toggle-list" style="margin-top:10px">
-              <label class="toggle"><input id="showGroupBrackets" type="checkbox" checked> 底部显示样本来源分组</label>
+              <label class="toggle"><input id="showGroupBrackets" type="checkbox" checked> 顶部显示样本来源分组</label>
             </div>
-            <p class="field-help">紧凑样式下使用第 1 步的分组画底部分段线，例如 NK × 2, 231WT × 4, 231OE × 4；泳道标签仍可写 NK, NK+H, WT...</p>
+            <p class="field-help">紧凑样式下使用第 1 步的分组在泳道标签上方画粗线，例如 NK × 2, WT × 4, OE × 4；泳道标签仍可写 NK, NK+H, WT...</p>
             <div class="inline-actions">
               <button class="button small" id="compactPreset" type="button">套用参考图样式</button>
             </div>
@@ -1142,9 +1142,9 @@
 
       function syncLaneToggleAvailability() {
         const input = $("#showLanes");
-        const unavailable = state.layoutMode === "compact" && (Boolean(state.footerLabel.trim()) || state.showGroupBrackets);
+        const unavailable = state.layoutMode === "compact" && Boolean(state.footerLabel.trim());
         input.disabled = unavailable;
-        input.closest(".toggle").title = unavailable ? "紧凑样式显示底部说明或样本来源分组时不显示泳道编号" : "";
+        input.closest(".toggle").title = unavailable ? "紧凑样式显示底部说明时不显示泳道编号" : "";
       }
 
       function parseGroups(value) {
@@ -1684,18 +1684,18 @@
         ) : 0;
         const groupAngles = compact ? [] : state.groups.map((group) => fullLabelAngle(group.name, group.count * state.rowHeight, state.labelSize));
         const groupTop = state.groups.reduce((maximum, group, index) => Math.max(maximum, measuredWidth(group.name, state.labelSize) * Math.sin(groupAngles[index] || 0)), 0);
-        const top = compact ? Math.max(72, Math.ceil(longestLaneLabel * Math.sin(labelAngle) + state.labelSize + 18)) : Math.max(82, Math.ceil(groupTop + state.labelSize + 42));
+        const topGroups = compact && state.showGroupBrackets && state.groups.length > 1 && totalSamples() > 1;
+        const baseTop = compact ? Math.max(72, Math.ceil(longestLaneLabel * Math.sin(labelAngle) + state.labelSize + 18)) : Math.max(82, Math.ceil(groupTop + state.labelSize + 42));
+        const topGroupLineY = 9;
+        const topGroupLabelY = topGroupLineY + Math.max(20, Math.ceil(state.labelSize * 1.25));
+        const top = baseTop + (topGroups ? topGroupLabelY + 18 : 0);
         const rowCount = Math.max(1, state.rows.length);
         const contentBottom = top + rowCount * state.rowHeight + Math.max(0, rowCount - 1) * state.rowGap;
-        const bottomGroups = compact && state.showGroupBrackets && state.groups.length > 1 && totalSamples() > 1;
-        const groupLineY = contentBottom + 14;
-        const groupLabelY = groupLineY + Math.max(18, Math.ceil(state.labelSize * 1.15));
-        const footerLineY = bottomGroups ? groupLabelY + 22 : contentBottom + 14;
+        const footerLineY = contentBottom + 14;
         const footerLabelY = footerLineY + 23;
-        let bottom = compact && state.footerLabel.trim() ? 86 : (state.showLanes ? 55 : 28);
-        if (bottomGroups) bottom = Math.max(bottom, state.footerLabel.trim() ? 104 : 62);
+        const bottom = compact && state.footerLabel.trim() ? 86 : (state.showLanes ? 55 : 28);
         const height = contentBottom + bottom;
-        return { width, height, left, right, top, bottom, bandWidth, contentBottom, bottomGroups, groupLineY, groupLabelY, footerLineY, footerLabelY, labelAngle, groupAngles };
+        return { width, height, left, right, top, bottom, bandWidth, contentBottom, topGroups, topGroupLineY, topGroupLabelY, footerLineY, footerLabelY, labelAngle, groupAngles };
       }
 
       function drawContainedImage(ctx, row, x, y, width, height) {
@@ -1733,6 +1733,29 @@
         ctx.textBaseline = "middle";
         ctx.fillStyle = "#111827";
         if (compact) {
+          if (g.topGroups) {
+            let laneOffset = 0;
+            ctx.strokeStyle = "#111827";
+            ctx.fillStyle = "#111827";
+            ctx.textAlign = "center";
+            state.groups.forEach((group) => {
+              const start = g.left + laneOffset * laneWidth;
+              const end = start + group.count * laneWidth;
+              const span = end - start;
+              const inset = Math.min(7, span * .1);
+              ctx.lineCap = "round";
+              ctx.lineWidth = 4;
+              ctx.beginPath();
+              ctx.moveTo(start + inset, g.topGroupLineY);
+              ctx.lineTo(end - inset, g.topGroupLineY);
+              ctx.stroke();
+              const label = fittedLabel(group.name, Math.max(1, span - 6), state.labelSize, 700);
+              ctx.font = `700 ${label.size}px Arial, "Microsoft YaHei", sans-serif`;
+              ctx.fillText(label.text, (start + end) / 2, g.topGroupLabelY);
+              laneOffset += group.count;
+            });
+            ctx.lineCap = "butt";
+          }
           resolvedLaneLabels().forEach((value, lane) => {
             ctx.save();
             ctx.translate(g.left + lane * laneWidth + Math.min(6, laneWidth * .15), g.top - 8);
@@ -1818,38 +1841,6 @@
           });
         });
 
-        if (compact && g.bottomGroups) {
-          let laneOffset = 0;
-          ctx.strokeStyle = "#111827";
-          ctx.fillStyle = "#111827";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          state.groups.forEach((group) => {
-            const start = g.left + laneOffset * laneWidth;
-            const end = start + group.count * laneWidth;
-            const span = end - start;
-            const inset = Math.min(8, span * .16);
-            ctx.lineCap = "round";
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(start + inset, g.groupLineY);
-            ctx.lineTo(end - inset, g.groupLineY);
-            ctx.stroke();
-            ctx.lineCap = "butt";
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(start + inset, g.groupLineY);
-            ctx.lineTo(start + inset, g.groupLineY + 5);
-            ctx.moveTo(end - inset, g.groupLineY);
-            ctx.lineTo(end - inset, g.groupLineY + 5);
-            ctx.stroke();
-            const label = fittedLabel(group.name, Math.max(1, span - 6), Math.max(11, state.labelSize - 2), 700);
-            ctx.font = `700 ${label.size}px Arial, "Microsoft YaHei", sans-serif`;
-            ctx.fillText(label.text, (start + end) / 2, g.groupLabelY);
-            laneOffset += group.count;
-          });
-        }
-
         if (compact && state.footerLabel.trim()) {
           ctx.strokeStyle = "#111827";
           ctx.lineWidth = 4;
@@ -1864,7 +1855,7 @@
           ctx.font = `700 ${footer.size}px Arial, "Microsoft YaHei", sans-serif`;
           ctx.textAlign = "center";
           ctx.fillText(footer.text, g.left + g.bandWidth / 2, g.footerLabelY);
-        } else if (state.showLanes && !g.bottomGroups) {
+        } else if (state.showLanes) {
           const y = g.height - 19;
           ctx.fillStyle = "#657187";
           ctx.font = "500 12px Arial, sans-serif";
@@ -2078,6 +2069,19 @@
         const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${widthCm.toFixed(4)}cm" height="${heightCm.toFixed(4)}cm" viewBox="0 0 ${g.width} ${g.height}">`, `<rect width="100%" height="100%" fill="white"/>`];
         const compact = state.layoutMode === "compact";
         if (compact) {
+          if (g.topGroups) {
+            let laneOffset = 0;
+            state.groups.forEach((group) => {
+              const start = g.left + laneOffset * laneWidth;
+              const end = start + group.count * laneWidth;
+              const span = end - start;
+              const inset = Math.min(7, span * .1);
+              const label = fittedLabel(group.name, Math.max(1, span - 6), state.labelSize, 700);
+              parts.push(`<line x1="${start + inset}" y1="${g.topGroupLineY}" x2="${end - inset}" y2="${g.topGroupLineY}" stroke="#111827" stroke-width="4" stroke-linecap="round"/>`);
+              parts.push(`<text x="${(start + end) / 2}" y="${g.topGroupLabelY}" dominant-baseline="middle" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${label.size}" font-weight="700" fill="#111827">${xml(label.text)}</text>`);
+              laneOffset += group.count;
+            });
+          }
           resolvedLaneLabels().forEach((value, lane) => {
             const x = g.left + lane * laneWidth + Math.min(6, laneWidth * .15);
             const y = g.top - 8;
@@ -2118,26 +2122,11 @@
           if (state.showBorder) parts.push(`<rect x="${g.left + .5}" y="${y + .5}" width="${g.bandWidth - 1}" height="${state.rowHeight - 1}" fill="none" stroke="${compact ? "#374151" : "#9ca8b9"}"/>`);
           (row.splices || []).forEach((boundary) => parts.push(`<line x1="${g.left + boundary * laneWidth}" y1="${y}" x2="${g.left + boundary * laneWidth}" y2="${y + state.rowHeight}" stroke="#111827" stroke-width="2"/>`));
         });
-        if (compact && g.bottomGroups) {
-          let laneOffset = 0;
-          state.groups.forEach((group) => {
-            const start = g.left + laneOffset * laneWidth;
-            const end = start + group.count * laneWidth;
-            const span = end - start;
-            const inset = Math.min(8, span * .16);
-            const label = fittedLabel(group.name, Math.max(1, span - 6), Math.max(11, state.labelSize - 2), 700);
-            parts.push(`<line x1="${start + inset}" y1="${g.groupLineY}" x2="${end - inset}" y2="${g.groupLineY}" stroke="#111827" stroke-width="2" stroke-linecap="round"/>`);
-            parts.push(`<line x1="${start + inset}" y1="${g.groupLineY}" x2="${start + inset}" y2="${g.groupLineY + 5}" stroke="#111827" stroke-width="1.5"/>`);
-            parts.push(`<line x1="${end - inset}" y1="${g.groupLineY}" x2="${end - inset}" y2="${g.groupLineY + 5}" stroke="#111827" stroke-width="1.5"/>`);
-            parts.push(`<text x="${(start + end) / 2}" y="${g.groupLabelY}" dominant-baseline="middle" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${label.size}" font-weight="700" fill="#111827">${xml(label.text)}</text>`);
-            laneOffset += group.count;
-          });
-        }
         if (compact && state.footerLabel.trim()) {
           const footer = fittedLabel(state.footerLabel.trim(), g.bandWidth, state.labelSize, 700);
           parts.push(`<line x1="${g.left + 1}" y1="${g.footerLineY}" x2="${g.left + g.bandWidth - 1}" y2="${g.footerLineY}" stroke="#111827" stroke-width="4" stroke-linecap="round"/>`);
           parts.push(`<text x="${g.left + g.bandWidth / 2}" y="${g.footerLabelY}" dominant-baseline="middle" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${footer.size}" font-weight="700" fill="#111827">${xml(footer.text)}</text>`);
-        } else if (state.showLanes && !g.bottomGroups) {
+        } else if (state.showLanes) {
           for (let lane = 0; lane < samples; lane += 1) parts.push(`<text x="${g.left + (lane + .5) * laneWidth}" y="${g.height - 15}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#657187">${lane + 1}</text>`);
         }
         parts.push("</svg>");
@@ -3782,7 +3771,7 @@
           laneLabels: [...settings.laneLabels],
           layoutMode: settings.layoutMode,
           footerLabel: settings.footerLabel,
-          showGroupBrackets: project.version >= 3 ? booleanValue(settings.showGroupBrackets, "底部分组开关") : true,
+          showGroupBrackets: project.version >= 3 ? booleanValue(settings.showGroupBrackets, "顶部来源分组开关") : true,
           laneWidth: finiteInRange(settings.laneWidth, 28, 130, "泳道宽度"),
           rowHeight: finiteInRange(settings.rowHeight, 28, 130, "条带行高"),
           rowGap: finiteInRange(settings.rowGap, 0, 48, "行间距"),
