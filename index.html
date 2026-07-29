@@ -251,6 +251,22 @@
     .group-summary { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
     .chip { padding: 7px 9px; border-radius: 999px; color: var(--blue-dark); background: var(--blue-soft); font-size: 11px; font-weight: 800; }
     .inline-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .hierarchy-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 16px; }
+    .hierarchy-option {
+      min-height: 78px;
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--muted);
+      background: #fff;
+      cursor: pointer;
+      text-align: left;
+    }
+    .hierarchy-option strong, .hierarchy-option span { display: block; }
+    .hierarchy-option strong { color: var(--ink); font-size: 12px; }
+    .hierarchy-option span { margin-top: 5px; font-size: 10px; line-height: 1.45; }
+    .hierarchy-option[aria-pressed="true"] { border-color: #7fa0ed; color: var(--blue-dark); background: var(--blue-soft); box-shadow: inset 0 0 0 1px #b8c9f5; }
+    .hierarchy-option[aria-pressed="true"] strong { color: var(--blue-dark); }
 
     .dropzone {
       display: grid;
@@ -566,12 +582,22 @@
         <aside class="controls" aria-label="组图设置">
           <section class="control-block">
             <div class="control-title"><h3>样本分组</h3><span class="step">1</span></div>
-            <label class="caption" for="groupInput">每组名称与样本数</label>
+            <div class="hierarchy-switch" aria-label="选择组图界面">
+              <button class="hierarchy-option" id="singleLevelMode" type="button" aria-pressed="true">
+                <strong>单层组图</strong>
+                <span>一个细胞系内直接比较</span>
+              </button>
+              <button class="hierarchy-option" id="nestedLevelMode" type="button" aria-pressed="false">
+                <strong>双层组图</strong>
+                <span>细胞系内再分来源大组</span>
+              </button>
+            </div>
+            <label class="caption" id="groupInputCaption" for="groupInput">实验组名称与样本数</label>
             <textarea id="groupInput" spellcheck="false">Control × 1, Group 1 × 1, Group 2 × 1</textarea>
-            <p class="field-help">格式示例：Control × 3, Drug × 3；最多 24 个样本。</p>
-            <label class="caption" for="laneLabelInput" style="margin-top:14px">泳道标签（可选）</label>
+            <p class="field-help" id="groupInputHelp">格式示例：Control × 3, Drug × 3；最多 24 个样本。</p>
+            <label class="caption" id="laneLabelCaption" for="laneLabelInput" style="margin-top:14px">泳道标签（可选）</label>
             <textarea id="laneLabelInput" spellcheck="false" placeholder="例如 Control, Group 1, Group 2"></textarea>
-            <p class="field-help">逗号分隔，数量须与总样本数一致；留空会自动生成。</p>
+            <p class="field-help" id="laneLabelHelp">逗号分隔，数量须与总样本数一致；留空会自动生成。</p>
             <div class="inline-actions">
               <button class="button small primary" id="applyGroups" type="button">应用分组与标签</button>
               <button class="button small" id="loadDemo" type="button">恢复示例</button>
@@ -601,10 +627,6 @@
             </select>
             <label class="caption" for="footerLabel" style="margin-top:14px">底部说明 / 细胞系</label>
             <input id="footerLabel" type="text" maxlength="40" value="Cell line" placeholder="例如 Cell line">
-            <div class="toggle-list" style="margin-top:10px">
-              <label class="toggle"><input id="showGroupBrackets" type="checkbox" checked> 顶部显示样本来源分组</label>
-            </div>
-            <p class="field-help">紧凑样式下使用第 1 步的分组在泳道标签上方画粗线，例如 NK × 2, WT × 4, OE × 4；泳道标签仍可写 NK, NK+H, WT...</p>
             <div class="inline-actions">
               <button class="button small" id="compactPreset" type="button">套用参考图样式</button>
             </div>
@@ -830,7 +852,7 @@
         rows: [],
         layoutMode: "compact",
         footerLabel: "Cell line",
-        showGroupBrackets: true,
+        showGroupBrackets: false,
         laneWidth: 40,
         rowHeight: 40,
         rowGap: 7,
@@ -939,7 +961,7 @@
           rows: snapshot.rows.map(cloneRuntimeRow),
           layoutMode: snapshot.layoutMode,
           footerLabel: snapshot.footerLabel,
-          showGroupBrackets: snapshot.showGroupBrackets ?? true,
+          showGroupBrackets: snapshot.showGroupBrackets ?? false,
           laneWidth: snapshot.laneWidth,
           rowHeight: snapshot.rowHeight,
           rowGap: snapshot.rowGap,
@@ -1132,12 +1154,26 @@
         $("#showMw").checked = state.showMw;
         $("#showLanes").checked = state.showLanes;
         $("#showBorder").checked = state.showBorder;
-        $("#showGroupBrackets").checked = state.showGroupBrackets;
+        syncHierarchyControls();
         $("#pngDpi").value = String(state.pngDpi);
         $("#journalProfile").value = state.exportProfile || "preserve";
         $("#panelColumns").value = String(state.panelColumns || 2);
         $("#panelGap").value = String(state.panelGap ?? 24);
         syncLaneToggleAvailability();
+      }
+
+      function syncHierarchyControls() {
+        const nested = state.showGroupBrackets;
+        $("#singleLevelMode").setAttribute("aria-pressed", String(!nested));
+        $("#nestedLevelMode").setAttribute("aria-pressed", String(nested));
+        $("#groupInputCaption").textContent = nested ? "顶部来源大组与泳道数" : "实验组名称与样本数";
+        $("#groupInputHelp").textContent = nested
+          ? "格式示例：NK × 2, WT × 4, OE × 4；每个大组的数量应覆盖对应泳道。"
+          : "格式示例：Control × 3, Drug × 3；适合同一细胞系内直接比较。";
+        $("#laneLabelCaption").textContent = nested ? "每条泳道标签" : "泳道标签（可选）";
+        $("#laneLabelHelp").textContent = nested
+          ? "按泳道顺序填写，例如 NK, NK+H, WT, WT+H；数量须与总泳道数一致。"
+          : "逗号分隔，数量须与总样本数一致；留空会自动生成。";
       }
 
       function syncLaneToggleAvailability() {
@@ -1331,7 +1367,7 @@
         state.laneLabels = defaultLaneLabels(state.groups);
         state.layoutMode = "compact";
         state.footerLabel = "Cell line";
-        state.showGroupBrackets = true;
+        state.showGroupBrackets = false;
         state.laneWidth = 40;
         state.rowHeight = 40;
         state.rowGap = 7;
@@ -1398,7 +1434,7 @@
           || JSON.stringify(state.laneLabels) !== JSON.stringify(["Control", "Group 1", "Group 2"])
           || state.layoutMode !== "compact"
           || state.footerLabel !== "Cell line"
-          || !state.showGroupBrackets
+          || state.showGroupBrackets
           || state.laneWidth !== 40
           || state.rowHeight !== 40
           || state.rowGap !== 7
@@ -1686,9 +1722,9 @@
         const groupTop = state.groups.reduce((maximum, group, index) => Math.max(maximum, measuredWidth(group.name, state.labelSize) * Math.sin(groupAngles[index] || 0)), 0);
         const topGroups = compact && state.showGroupBrackets && state.groups.length > 1 && totalSamples() > 1;
         const baseTop = compact ? Math.max(72, Math.ceil(longestLaneLabel * Math.sin(labelAngle) + state.labelSize + 18)) : Math.max(82, Math.ceil(groupTop + state.labelSize + 42));
-        const topGroupLineY = 9;
-        const topGroupLabelY = topGroupLineY + Math.max(20, Math.ceil(state.labelSize * 1.25));
-        const top = baseTop + (topGroups ? topGroupLabelY + 18 : 0);
+        const topGroupLabelY = Math.max(12, Math.ceil(state.labelSize * .75));
+        const topGroupLineY = topGroupLabelY + Math.max(14, Math.ceil(state.labelSize * .9));
+        const top = baseTop + (topGroups ? topGroupLineY + 8 : 0);
         const rowCount = Math.max(1, state.rows.length);
         const contentBottom = top + rowCount * state.rowHeight + Math.max(0, rowCount - 1) * state.rowGap;
         const footerLineY = contentBottom + 14;
@@ -3413,7 +3449,7 @@
           if (!applySampleLayout(templateGroups, templateLaneLabels)) return false;
           state.layoutMode = ["compact", "groups"].includes(template.layoutMode) ? template.layoutMode : "compact";
           state.footerLabel = String(template.footerLabel || "").slice(0, 40);
-          state.showGroupBrackets = template.showGroupBrackets !== false;
+          state.showGroupBrackets = Boolean(template.showGroupBrackets);
           state.laneWidth = Math.max(28, Math.min(130, Number(template.laneWidth) || 40));
           state.rowHeight = state.laneWidth;
           state.rowGap = Math.max(0, Math.min(48, Number(template.rowGap) || 0));
@@ -3771,7 +3807,7 @@
           laneLabels: [...settings.laneLabels],
           layoutMode: settings.layoutMode,
           footerLabel: settings.footerLabel,
-          showGroupBrackets: project.version >= 3 ? booleanValue(settings.showGroupBrackets, "顶部来源分组开关") : true,
+          showGroupBrackets: project.version >= 3 ? booleanValue(settings.showGroupBrackets, "顶部来源分组开关") : false,
           laneWidth: finiteInRange(settings.laneWidth, 28, 130, "泳道宽度"),
           rowHeight: finiteInRange(settings.rowHeight, 28, 130, "条带行高"),
           rowGap: finiteInRange(settings.rowGap, 0, 48, "行间距"),
@@ -4494,7 +4530,6 @@
         state.showMw = true;
         state.showLanes = false;
         state.showBorder = true;
-        state.showGroupBrackets = true;
         $("#groupInput").value = groupsToText(state.groups);
         $("#laneLabelInput").value = laneLabelText.trim() ? laneLabelsToText(state.laneLabels) : "";
         syncLayoutControls();
@@ -4514,12 +4549,21 @@
           requestRender();
         });
       });
-      [["showMw", "showMw"], ["showLanes", "showLanes"], ["showBorder", "showBorder"], ["showGroupBrackets", "showGroupBrackets"]].forEach(([inputId, key]) => {
+      [["showMw", "showMw"], ["showLanes", "showLanes"], ["showBorder", "showBorder"]].forEach(([inputId, key]) => {
         $("#" + inputId).addEventListener("change", (event) => {
           state[key] = event.target.checked;
-          if (key === "showGroupBrackets") syncLaneToggleAvailability();
           markDirty();
           requestRender();
+        });
+      });
+      [["singleLevelMode", false], ["nestedLevelMode", true]].forEach(([inputId, nested]) => {
+        $("#" + inputId).addEventListener("click", () => {
+          if (state.showGroupBrackets === nested) return;
+          state.showGroupBrackets = nested;
+          syncHierarchyControls();
+          markDirty();
+          requestRender();
+          toast(nested ? "已切换到双层组图界面" : "已切换到单层组图界面");
         });
       });
       $("#exportPng").addEventListener("click", exportPng);

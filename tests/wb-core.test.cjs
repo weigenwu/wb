@@ -316,7 +316,7 @@ function testPwaShell() {
   assert.match(html, /navigator\.serviceWorker\.register\("\.\/sw\.js"\)/);
   const worker = fs.readFileSync(path.join(root, "sw.js"), "utf8");
   assert.ok(worker.includes("./wb-core.js"));
-  assert.ok(worker.includes("figurelab-wb-v2.1.2"));
+  assert.ok(worker.includes("figurelab-wb-v2.1.3"));
   ["sampleMapText", "suggestRois", "exposureCheck", "downloadExposureReport"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
 }
 
