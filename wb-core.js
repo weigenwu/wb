@@ -5,7 +5,7 @@
 })(typeof globalThis === "undefined" ? this : globalThis, function () {
   "use strict";
 
-  const ENGINE_VERSION = "2.2.1";
+  const ENGINE_VERSION = "2.2.2";
   const encoder = new TextEncoder();
 
   function bytes(value) {
@@ -745,11 +745,44 @@
       gray[pixel] = Math.round(output[offset] * .2126 + output[offset + 1] * .7152 + output[offset + 2] * .0722);
     }
     const background = adaptiveBackgroundSurface(gray, width, height);
+    const toneHistogram = new Uint32Array(256);
+    for (let pixel = 0; pixel < gray.length; pixel += 1) toneHistogram[gray[pixel]] += 1;
+    const toneTarget = Math.floor(gray.length * .4);
+    let toneCumulative = 0;
+    let darkToneThreshold = 255;
+    for (let value = 0; value < 256; value += 1) {
+      toneCumulative += toneHistogram[value];
+      if (toneCumulative > toneTarget) { darkToneThreshold = value; break; }
+    }
+    const darkness = new Float32Array(gray.length);
+    const integralWidth = width + 1;
+    const integral = new Float64Array(integralWidth * (height + 1));
+    for (let y = 0; y < height; y += 1) {
+      let rowSum = 0;
+      for (let x = 0; x < width; x += 1) {
+        const pixel = y * width + x;
+        darkness[pixel] = Math.max(0, background[pixel] - gray[pixel]);
+        rowSum += darkness[pixel];
+        integral[(y + 1) * integralWidth + x + 1] = integral[y * integralWidth + x + 1] + rowSum;
+      }
+    }
+    const protectionRadiusX = Math.max(1, Math.round(width / 320));
+    const protectionRadiusY = Math.max(1, Math.round(height / 50));
     const targetBackground = 248;
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
         const pixel = y * width + x;
-        const correction = amount * (targetBackground - background[pixel]);
+        const x0 = Math.max(0, x - protectionRadiusX);
+        const x1 = Math.min(width, x + protectionRadiusX + 1);
+        const y0 = Math.max(0, y - protectionRadiusY);
+        const y1 = Math.min(height, y + protectionRadiusY + 1);
+        const localDarkness = (integral[y1 * integralWidth + x1] - integral[y0 * integralWidth + x1] - integral[y1 * integralWidth + x0] + integral[y0 * integralWidth + x0]) / ((x1 - x0) * (y1 - y0));
+        const protectionPosition = Math.max(0, Math.min(1, (localDarkness - 2) / 10));
+        const localProtection = protectionPosition * protectionPosition * (3 - 2 * protectionPosition);
+        const tonePosition = Math.max(0, Math.min(1, (darkToneThreshold + 4 - gray[pixel]) / 12));
+        const toneProtection = tonePosition * tonePosition * (3 - 2 * tonePosition);
+        const bandProtection = localProtection * toneProtection;
+        const correction = amount * (targetBackground - background[pixel]) * (1 - bandProtection);
         const offset = pixel * 4;
         output[offset] = output[offset] + correction;
         output[offset + 1] = output[offset + 1] + correction;

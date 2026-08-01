@@ -255,6 +255,7 @@ function testDisplayBackgroundFlattening() {
       let value = 128 + Math.round(x * 1.3) + Math.round(y * .8);
       if ((x - 43) ** 2 / 180 + (y - 5) ** 2 / 10 < 1) value += 45;
       if (y >= 7 && y <= 10 && ((x >= 8 && x <= 14) || (x >= 28 && x <= 34) || (x >= 46 && x <= 52))) value -= 95;
+      if (y >= 7 && y <= 10 && x >= 19 && x <= 24) value -= 28;
       rgba[offset] = value;
       rgba[offset + 1] = value;
       rgba[offset + 2] = value;
@@ -264,9 +265,12 @@ function testDisplayBackgroundFlattening() {
   const flattened = core.flattenDisplayBackground({ rgba, width, height, strength: 100 });
   const background = (x, y = 2) => flattened[(y * width + x) * 4];
   const band = (x) => flattened[(8 * width + x) * 4];
+  const originalBand = (x) => rgba[(8 * width + x) * 4];
   const backgroundSamples = [background(4), background(22), background(42), background(55), background(42, 5), background(18, 14)];
   assert.ok(Math.max(...backgroundSamples) - Math.min(...backgroundSamples) < 18, "two-dimensional white-field patches should be flattened");
   assert.ok(background(11) - band(11) > 55, "dark band contrast should remain visible after display correction");
+  assert.ok(Math.abs(band(11) - originalBand(11)) < 12, "dark band pixels should be protected from background brightening");
+  assert.ok(Math.abs(band(21) - originalBand(21)) < 12, "weak band pixels should be protected from background brightening");
   assert.deepEqual(core.flattenDisplayBackground({ rgba, width, height, strength: 0 }), rgba, "zero strength must leave display pixels unchanged");
 }
 
@@ -362,7 +366,7 @@ function testPwaShell() {
   assert.match(html, /navigator\.serviceWorker\.register\("\.\/sw\.js"\)/);
   const worker = fs.readFileSync(path.join(root, "sw.js"), "utf8");
   assert.ok(worker.includes("./wb-core.js"));
-  assert.ok(worker.includes("figurelab-wb-v2.2.1"));
+  assert.ok(worker.includes("figurelab-wb-v2.2.2"));
   ["sampleMapText", "suggestRois", "exposureCheck", "downloadExposureReport", "editBackgroundClean", "editRotation", "autoStraighten"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
 }
 
