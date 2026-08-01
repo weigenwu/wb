@@ -252,7 +252,8 @@ function testDisplayBackgroundFlattening() {
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const offset = (y * width + x) * 4;
-      let value = 150 + Math.round(x * 1.4) + Math.round(y * .7);
+      let value = 128 + Math.round(x * 1.3) + Math.round(y * .8);
+      if ((x - 43) ** 2 / 180 + (y - 5) ** 2 / 10 < 1) value += 45;
       if (y >= 7 && y <= 10 && ((x >= 8 && x <= 14) || (x >= 28 && x <= 34) || (x >= 46 && x <= 52))) value -= 95;
       rgba[offset] = value;
       rgba[offset + 1] = value;
@@ -261,11 +262,33 @@ function testDisplayBackgroundFlattening() {
     }
   }
   const flattened = core.flattenDisplayBackground({ rgba, width, height, strength: 100 });
-  const background = (x) => flattened[(2 * width + x) * 4];
+  const background = (x, y = 2) => flattened[(y * width + x) * 4];
   const band = (x) => flattened[(8 * width + x) * 4];
-  assert.ok(Math.abs(background(4) - background(55)) < 12, "low-frequency white-field gradient should be flattened");
+  const backgroundSamples = [background(4), background(22), background(42), background(55), background(42, 5), background(18, 14)];
+  assert.ok(Math.max(...backgroundSamples) - Math.min(...backgroundSamples) < 18, "two-dimensional white-field patches should be flattened");
   assert.ok(background(11) - band(11) > 55, "dark band contrast should remain visible after display correction");
   assert.deepEqual(core.flattenDisplayBackground({ rgba, width, height, strength: 0 }), rgba, "zero strength must leave display pixels unchanged");
+}
+
+function testAutomaticStripRotation() {
+  const width = 160;
+  const height = 32;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  const slope = .07;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      const center = 9 + slope * x;
+      const inBand = Math.abs(y - center) <= 1.4 && Math.floor(x / 16) % 2 === 0;
+      const value = inBand ? 45 : 218 + Math.round(x / width * 18);
+      rgba[offset] = value;
+      rgba[offset + 1] = value;
+      rgba[offset + 2] = value;
+      rgba[offset + 3] = 255;
+    }
+  }
+  const angle = core.estimateStripRotation({ rgba, width, height });
+  assert.ok(Math.abs(angle + Math.atan(slope) * 180 / Math.PI) < .8, `automatic rotation should correct the shared strip slope, received ${angle}`);
 }
 
 function testNormalizationAndPrism() {
@@ -339,8 +362,8 @@ function testPwaShell() {
   assert.match(html, /navigator\.serviceWorker\.register\("\.\/sw\.js"\)/);
   const worker = fs.readFileSync(path.join(root, "sw.js"), "utf8");
   assert.ok(worker.includes("./wb-core.js"));
-  assert.ok(worker.includes("figurelab-wb-v2.2.0"));
-  ["sampleMapText", "suggestRois", "exposureCheck", "downloadExposureReport", "editBackgroundClean"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
+  assert.ok(worker.includes("figurelab-wb-v2.2.1"));
+  ["sampleMapText", "suggestRois", "exposureCheck", "downloadExposureReport", "editBackgroundClean", "editRotation", "autoStraighten"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
 }
 
 function testUnifiedSuiteShell() {
@@ -367,6 +390,7 @@ function testUnifiedSuiteShell() {
   testExposureSeries,
   testDarkAndBrightRois,
   testDisplayBackgroundFlattening,
+  testAutomaticStripRotation,
   testNormalizationAndPrism,
   testQc,
   testPwaShell,

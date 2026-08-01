@@ -5,7 +5,7 @@
 })(typeof globalThis === "undefined" ? this : globalThis, function () {
   "use strict";
 
-  const ENGINE_VERSION = "2.2.0";
+  const ENGINE_VERSION = "2.2.1";
   const encoder = new TextEncoder();
 
   function bytes(value) {
@@ -679,26 +679,55 @@
     });
   }
 
-  function histogramQuantile(values, quantile) {
+  function adaptiveBackgroundSurface(gray, width, height) {
+    const gridWidth = Math.max(12, Math.min(40, Math.ceil(width / 32)));
+    const gridHeight = Math.max(6, Math.min(14, Math.ceil(height / 10)));
+    const radiusX = Math.max(3, Math.round(width / 24));
+    const radiusY = Math.max(3, Math.round(height / 4));
+    const grid = new Float32Array(gridWidth * gridHeight);
     const histogram = new Uint32Array(256);
-    values.forEach((value) => { histogram[Math.max(0, Math.min(255, Math.round(value)))] += 1; });
-    const target = Math.max(0, Math.min(values.length - 1, Math.floor(values.length * quantile)));
-    let cumulative = 0;
-    for (let value = 0; value < histogram.length; value += 1) {
-      cumulative += histogram[value];
-      if (cumulative > target) return value;
+    for (let gridY = 0; gridY < gridHeight; gridY += 1) {
+      const centerY = Math.round(gridY * (height - 1) / (gridHeight - 1));
+      const startY = Math.max(0, centerY - radiusY);
+      const endY = Math.min(height - 1, centerY + radiusY);
+      for (let gridX = 0; gridX < gridWidth; gridX += 1) {
+        const centerX = Math.round(gridX * (width - 1) / (gridWidth - 1));
+        const startX = Math.max(0, centerX - radiusX);
+        const endX = Math.min(width - 1, centerX + radiusX);
+        histogram.fill(0);
+        let count = 0;
+        for (let y = startY; y <= endY; y += 1) {
+          const row = y * width;
+          for (let x = startX; x <= endX; x += 1) {
+            histogram[gray[row + x]] += 1;
+            count += 1;
+          }
+        }
+        const target = Math.floor(count * .58);
+        let cumulative = 0;
+        let value = 255;
+        for (let candidate = 0; candidate < 256; candidate += 1) {
+          cumulative += histogram[candidate];
+          if (cumulative > target) { value = candidate; break; }
+        }
+        grid[gridY * gridWidth + gridX] = value;
+      }
     }
-    return 255;
-  }
-
-  function smoothLine(values, radius) {
-    const output = new Float32Array(values.length);
-    const prefix = new Float64Array(values.length + 1);
-    for (let index = 0; index < values.length; index += 1) prefix[index + 1] = prefix[index] + values[index];
-    for (let index = 0; index < values.length; index += 1) {
-      const start = Math.max(0, index - radius);
-      const end = Math.min(values.length, index + radius + 1);
-      output[index] = (prefix[end] - prefix[start]) / (end - start);
+    const output = new Float32Array(gray.length);
+    for (let y = 0; y < height; y += 1) {
+      const gridPositionY = y * (gridHeight - 1) / Math.max(1, height - 1);
+      const y0 = Math.floor(gridPositionY);
+      const y1 = Math.min(gridHeight - 1, y0 + 1);
+      const mixY = gridPositionY - y0;
+      for (let x = 0; x < width; x += 1) {
+        const gridPositionX = x * (gridWidth - 1) / Math.max(1, width - 1);
+        const x0 = Math.floor(gridPositionX);
+        const x1 = Math.min(gridWidth - 1, x0 + 1);
+        const mixX = gridPositionX - x0;
+        const top = grid[y0 * gridWidth + x0] * (1 - mixX) + grid[y0 * gridWidth + x1] * mixX;
+        const bottom = grid[y1 * gridWidth + x0] * (1 - mixX) + grid[y1 * gridWidth + x1] * mixX;
+        output[y * width + x] = top * (1 - mixY) + bottom * mixY;
+      }
     }
     return output;
   }
@@ -715,29 +744,12 @@
       const offset = pixel * 4;
       gray[pixel] = Math.round(output[offset] * .2126 + output[offset + 1] * .7152 + output[offset + 2] * .0722);
     }
-    const columns = new Float32Array(width);
-    const rows = new Float32Array(height);
-    const samples = [];
-    for (let x = 0; x < width; x += 1) {
-      samples.length = 0;
-      for (let y = 0; y < height; y += 1) samples.push(gray[y * width + x]);
-      columns[x] = histogramQuantile(samples, .82);
-    }
-    for (let y = 0; y < height; y += 1) {
-      samples.length = 0;
-      const offset = y * width;
-      for (let x = 0; x < width; x += 1) samples.push(gray[offset + x]);
-      rows[y] = histogramQuantile(samples, .82);
-    }
-    const smoothColumns = smoothLine(columns, Math.max(2, Math.round(width / 45)));
-    const smoothRows = smoothLine(rows, Math.max(1, Math.round(height / 12)));
-    const globalBackground = histogramQuantile(gray, .82);
+    const background = adaptiveBackgroundSurface(gray, width, height);
     const targetBackground = 248;
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
         const pixel = y * width + x;
-        const localBackground = smoothColumns[x] + smoothRows[y] - globalBackground;
-        const correction = amount * (targetBackground - localBackground);
+        const correction = amount * (targetBackground - background[pixel]);
         const offset = pixel * 4;
         output[offset] = output[offset] + correction;
         output[offset + 1] = output[offset + 1] + correction;
@@ -745,6 +757,50 @@
       }
     }
     return output;
+  }
+
+  function estimateStripRotation({ rgba, width, height, maxDegrees = 8 }) {
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 8 || height < 6) throw new Error("自动拉直尺寸无效");
+    if (!rgba || rgba.length !== width * height * 4) throw new Error("自动拉直像素长度无效");
+    const gray = new Uint8Array(width * height);
+    for (let pixel = 0; pixel < gray.length; pixel += 1) {
+      const offset = pixel * 4;
+      gray[pixel] = Math.round(rgba[offset] * .2126 + rgba[offset + 1] * .7152 + rgba[offset + 2] * .0722);
+    }
+    const binCount = Math.max(8, Math.min(40, Math.round(width / 16)));
+    const points = Array.from({ length: binCount }, () => ({ xWeight: 0, yWeight: 0, weight: 0 }));
+    const histogram = new Uint32Array(256);
+    for (let x = 0; x < width; x += 1) {
+      histogram.fill(0);
+      for (let y = 0; y < height; y += 1) histogram[gray[y * width + x]] += 1;
+      const target = Math.floor(height * .7);
+      let cumulative = 0;
+      let background = 255;
+      for (let value = 0; value < 256; value += 1) {
+        cumulative += histogram[value];
+        if (cumulative > target) { background = value; break; }
+      }
+      const bin = Math.min(binCount - 1, Math.floor(x * binCount / width));
+      for (let y = 0; y < height; y += 1) {
+        const deficit = background - gray[y * width + x];
+        if (deficit < 8) continue;
+        const weight = deficit * deficit;
+        points[bin].xWeight += x * weight;
+        points[bin].yWeight += y * weight;
+        points[bin].weight += weight;
+      }
+    }
+    const usable = points.filter((point) => point.weight > 0).map((point) => ({ x: point.xWeight / point.weight, y: point.yWeight / point.weight, weight: Math.sqrt(point.weight) }));
+    if (usable.length < Math.max(5, Math.floor(binCount / 3))) return 0;
+    const totalWeight = usable.reduce((sum, point) => sum + point.weight, 0);
+    const meanX = usable.reduce((sum, point) => sum + point.x * point.weight, 0) / totalWeight;
+    const meanY = usable.reduce((sum, point) => sum + point.y * point.weight, 0) / totalWeight;
+    const numerator = usable.reduce((sum, point) => sum + point.weight * (point.x - meanX) * (point.y - meanY), 0);
+    const denominator = usable.reduce((sum, point) => sum + point.weight * (point.x - meanX) ** 2, 0);
+    if (!denominator) return 0;
+    const correction = -Math.atan(numerator / denominator) * 180 / Math.PI;
+    const bounded = Math.max(-Math.abs(maxDegrees), Math.min(Math.abs(maxDegrees), correction));
+    return Math.abs(bounded) < .15 ? 0 : Math.round(bounded * 10) / 10;
   }
 
   function runIntegrityChecks(input) {
@@ -759,7 +815,7 @@
       if (!row.hasSource) errors.push({ code: "SOURCE_MISSING", message: `${label} 缺少原始图片。` });
       if (!row.sha256) warnings.push({ code: "HASH_MISSING", message: `${label} 尚无 SHA-256 校验值。` });
       if (!row.mw) warnings.push({ code: "MW_MISSING", message: `${label} 未填写分子量。` });
-      if (row.brightness !== 100 || row.contrast !== 100 || row.invert || row.backgroundClean > 0) warnings.push({ code: "IMAGE_ADJUSTED", message: `${label} 使用了显示调整；请确认调整统一应用于整块裁剪区域，并保留原始图。` });
+      if (row.brightness !== 100 || row.contrast !== 100 || row.invert || row.backgroundClean > 0 || row.rotation) warnings.push({ code: "IMAGE_ADJUSTED", message: `${label} 使用了显示调整；请确认调整统一应用于整块裁剪区域，并保留原始图。` });
       if (row.nonAdjacent && !(row.splices || []).length) errors.push({ code: "SPLICE_UNMARKED", message: `${label} 标记为非相邻泳道，但没有填写拼接边界。` });
       if ((row.splices || []).some((boundary) => !Number.isInteger(boundary) || boundary < 1 || boundary >= input.laneCount)) errors.push({ code: "SPLICE_INVALID", message: `${label} 的拼接边界超出泳道范围。` });
       if (row.signalClippedFraction > 0) warnings.push({ code: row.signalClippedFraction >= 0.01 ? "SATURATION_HIGH" : "SATURATION_PRESENT", message: `${label} 的已确认条带 ROI 中有 ${(row.signalClippedFraction * 100).toFixed(2)}% 端点像素。` });
@@ -801,6 +857,7 @@
     prismColumnTables,
     summarizeNormalized,
     flattenDisplayBackground,
+    estimateStripRotation,
     runIntegrityChecks,
   };
 });

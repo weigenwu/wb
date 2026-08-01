@@ -725,14 +725,15 @@
         <div class="range-field"><label for="editBrightness">亮度<input id="editBrightness" type="range" min="50" max="160" value="100"></label><span class="range-value" id="editBrightnessValue">100%</span></div>
         <div class="range-field"><label for="editContrast">对比度<input id="editContrast" type="range" min="50" max="200" value="100"></label><span class="range-value" id="editContrastValue">100%</span></div>
         <div class="range-field"><label for="editBackgroundClean">白场背景展平<input id="editBackgroundClean" type="range" min="0" max="100" step="5" value="0"></label><span class="range-value" id="editBackgroundCleanValue">关闭</span></div>
+        <div class="range-field"><label for="editRotation">整体拉直角度<input id="editRotation" type="range" min="-8" max="8" step="0.1" value="0"></label><span class="range-value" id="editRotationValue">0.0°</span></div>
         <div class="toggle-list"><label class="toggle"><input id="editInvert" type="checkbox"> 黑白反相</label></div>
-        <div class="inline-actions"><button class="button small" id="newCrop" type="button">重新框选</button><button class="button small" id="resetCrop" type="button">重置为最大比例区域</button></div>
+        <div class="inline-actions"><button class="button small" id="autoStraighten" type="button">自动拉直</button><button class="button small" id="newCrop" type="button">重新框选</button><button class="button small" id="resetCrop" type="button">重置为最大比例区域</button></div>
         <div class="editor-copy">
           <label class="caption" for="copyFromRow">复制另一行的裁剪与图像调整</label>
           <select id="copyFromRow"></select>
           <button class="button small" id="copyRowSettings" type="button">复制到当前行</button>
         </div>
-        <p class="field-help">背景展平只适用于黑条带、白背景，并统一作用于整块裁剪区域；灰度定量仍读取原始 TIFF。调整只作用于导出的副本，请避免过度增强。</p>
+        <p class="field-help">背景展平只适用于黑条带、白背景，建议从 70% 开始；自动拉直只做整块旋转，不会逐泳道变形。灰度定量仍读取原始 TIFF。</p>
       </div>
     </div>
     <div class="dialog-foot">
@@ -1312,6 +1313,7 @@
           brightness: 100,
           contrast: 100,
           backgroundClean: 0,
+          rotation: 0,
           invert: false,
           bytes: file.size,
           objectUrl: src
@@ -1321,7 +1323,7 @@
       }
 
       function blankRow() {
-        return { id: ++idCounter, rowKey: newRowKey(), name: `Protein ${idCounter}`, mw: "", role: "target", membraneId: "", nonAdjacent: false, splices: [], sourceFile: null, sourceName: "", sourceType: "", sourceBytes: 0, sourceLastModified: 0, sourceSha256: "", src: "", image: null, crop: null, brightness: 100, contrast: 100, backgroundClean: 0, invert: false, bytes: 0, objectUrl: null };
+        return { id: ++idCounter, rowKey: newRowKey(), name: `Protein ${idCounter}`, mw: "", role: "target", membraneId: "", nonAdjacent: false, splices: [], sourceFile: null, sourceName: "", sourceType: "", sourceBytes: 0, sourceLastModified: 0, sourceSha256: "", src: "", image: null, crop: null, brightness: 100, contrast: 100, backgroundClean: 0, rotation: 0, invert: false, bytes: 0, objectUrl: null };
       }
 
       function demoStrip(intensities, seed) {
@@ -1408,7 +1410,7 @@
           const sourceName = `${name.toLowerCase().replace(/\s+/g, "-")}-example.png`;
           const sourceBlob = dataUrlToBlob(src);
           const sourceFile = new File([sourceBlob], sourceName, { type: "image/png", lastModified: 0 });
-          const row = { id: ++idCounter, rowKey: newRowKey(), name, mw, role: name === "Protein B" ? "loading" : "target", membraneId: "example-1", nonAdjacent: false, splices: [], sourceFile, sourceName, sourceType: "image/png", sourceBytes: sourceFile.size, sourceLastModified: 0, sourceSha256: await sha256Blob(sourceFile), src, image, crop: null, brightness: 100, contrast: 110, backgroundClean: 0, invert: false, bytes: sourceFile.size, objectUrl: null };
+          const row = { id: ++idCounter, rowKey: newRowKey(), name, mw, role: name === "Protein B" ? "loading" : "target", membraneId: "example-1", nonAdjacent: false, splices: [], sourceFile, sourceName, sourceType: "image/png", sourceBytes: sourceFile.size, sourceLastModified: 0, sourceSha256: await sha256Blob(sourceFile), src, image, crop: null, brightness: 100, contrast: 110, backgroundClean: 0, rotation: 0, invert: false, bytes: sourceFile.size, objectUrl: null };
           row.crop = maximumAspectCrop(row);
           return row;
         }));
@@ -1749,7 +1751,8 @@
         ctx.rect(x, y, width, height);
         ctx.clip();
         const backgroundClean = Number(row.backgroundClean) || 0;
-        if (backgroundClean > 0) {
+        const rotation = Number(row.rotation) || 0;
+        if (backgroundClean > 0 || rotation !== 0) {
           const transformScale = Math.max(1, Math.abs(ctx.getTransform().a) || 1);
           const processedWidth = Math.max(1, Math.min(Math.ceil(crop.w), Math.ceil(width * transformScale)));
           const processedHeight = Math.max(1, Math.round(processedWidth * crop.h / crop.w));
@@ -1757,11 +1760,25 @@
           processed.width = processedWidth;
           processed.height = processedHeight;
           const processedContext = processed.getContext("2d", { willReadFrequently: true });
+          processedContext.fillStyle = "#fff";
+          processedContext.fillRect(0, 0, processedWidth, processedHeight);
+          processedContext.save();
           processedContext.filter = `brightness(${row.brightness}%) contrast(${row.contrast}%) invert(${row.invert ? 100 : 0}%)`;
-          processedContext.drawImage(row.image, crop.x, crop.y, crop.w, crop.h, 0, 0, processedWidth, processedHeight);
-          const imageData = processedContext.getImageData(0, 0, processedWidth, processedHeight);
-          imageData.data.set(window.WBCore.flattenDisplayBackground({ rgba: imageData.data, width: processedWidth, height: processedHeight, strength: backgroundClean }));
-          processedContext.putImageData(imageData, 0, 0);
+          if (rotation) {
+            processedContext.translate(processedWidth / 2, processedHeight / 2);
+            processedContext.rotate(rotation * Math.PI / 180);
+            processedContext.scale(processedWidth / crop.w, processedHeight / crop.h);
+            processedContext.translate(-(crop.x + crop.w / 2), -(crop.y + crop.h / 2));
+            processedContext.drawImage(row.image, 0, 0);
+          } else {
+            processedContext.drawImage(row.image, crop.x, crop.y, crop.w, crop.h, 0, 0, processedWidth, processedHeight);
+          }
+          processedContext.restore();
+          if (backgroundClean > 0) {
+            const imageData = processedContext.getImageData(0, 0, processedWidth, processedHeight);
+            imageData.data.set(window.WBCore.flattenDisplayBackground({ rgba: imageData.data, width: processedWidth, height: processedHeight, strength: backgroundClean }));
+            processedContext.putImageData(imageData, 0, 0);
+          }
           ctx.filter = "none";
           ctx.drawImage(processed, x, drawY, width, drawHeight);
         } else {
@@ -2249,6 +2266,7 @@
             brightness: row.brightness,
             contrast: row.contrast,
             backgroundClean: row.backgroundClean || 0,
+            rotation: row.rotation || 0,
             invert: row.invert,
             role: row.role,
             membraneId: row.membraneId,
@@ -2376,7 +2394,7 @@
             figure: { stem: artifactStem(), dpi: state.pngDpi, profile: state.exportProfile, metrics: currentFigureMetrics() },
             groups: state.groups,
             lane_labels: resolvedLaneLabels(),
-            rows: state.rows.map((row, index) => ({ order: index + 1, row_key: row.rowKey, protein: row.name, molecular_weight: row.mw, role: row.role, membrane_id: row.membraneId, source_file: row.sourceName, source_sha256: row.sourceSha256, splices: row.splices || [], crop: row.crop, brightness: row.brightness, contrast: row.contrast, background_clean: row.backgroundClean || 0, invert: row.invert })),
+            rows: state.rows.map((row, index) => ({ order: index + 1, row_key: row.rowKey, protein: row.name, molecular_weight: row.mw, role: row.role, membrane_id: row.membraneId, source_file: row.sourceName, source_sha256: row.sourceSha256, splices: row.splices || [], crop: row.crop, brightness: row.brightness, contrast: row.contrast, background_clean: row.backgroundClean || 0, rotation_degrees: row.rotation || 0, invert: row.invert })),
             panels: state.panels.map((panel, index) => ({ order: index + 1, key: panel.key, type: panel.type, label: panel.label, source_file: panel.sourceFile?.name || "current WB figure" })),
             preflight: report,
           };
@@ -3506,7 +3524,7 @@
           savedAt: new Date().toISOString(),
           projectId: state.projectId,
           layout: layoutTemplate(),
-          rows: state.rows.map((row) => ({ rowKey: row.rowKey, name: row.name, mw: row.mw, role: row.role, membraneId: row.membraneId, nonAdjacent: row.nonAdjacent, splices: row.splices, crop: row.crop, brightness: row.brightness, contrast: row.contrast, backgroundClean: row.backgroundClean || 0, invert: row.invert })),
+          rows: state.rows.map((row) => ({ rowKey: row.rowKey, name: row.name, mw: row.mw, role: row.role, membraneId: row.membraneId, nonAdjacent: row.nonAdjacent, splices: row.splices, crop: row.crop, brightness: row.brightness, contrast: row.contrast, backgroundClean: row.backgroundClean || 0, rotation: row.rotation || 0, invert: row.invert })),
           quant: { sampleMap: state.quant.sampleMap, rois: state.quant.rois, loadingKey: state.quant.loadingKey, controlGroup: state.quant.controlGroup, locked: state.quant.locked },
         };
       }
@@ -3543,6 +3561,7 @@
           row.brightness = saved.brightness;
           row.contrast = saved.contrast;
           row.backgroundClean = saved.backgroundClean || 0;
+          row.rotation = saved.rotation || 0;
           row.invert = saved.invert;
         });
         state.quant = { ...state.quant, ...(revision.quant || {}), results: null };
@@ -3696,6 +3715,7 @@
             brightness: row.brightness,
             contrast: row.contrast,
             backgroundClean: row.backgroundClean || 0,
+            rotation: row.rotation || 0,
             invert: row.invert,
             source: row.sourceFile ? {
               name: row.sourceName || row.sourceFile.name,
@@ -3861,6 +3881,7 @@
             brightness: finiteInRange(row.brightness, 50, 160, "亮度"),
             contrast: finiteInRange(row.contrast, 50, 200, "对比度"),
             backgroundClean: project.version >= 4 ? finiteInRange(row.backgroundClean, 0, 100, "白场背景展平") : 0,
+            rotation: project.version >= 4 && row.rotation !== undefined ? finiteInRange(row.rotation, -8, 8, "整体拉直角度") : 0,
             invert: booleanValue(row.invert, "反相开关"),
             source: row.source
           };
@@ -3944,6 +3965,7 @@
               row.brightness = item.brightness;
               row.contrast = item.contrast;
               row.backgroundClean = item.backgroundClean;
+              row.rotation = item.rotation;
               row.invert = item.invert;
               temporaryRows.push(row);
               continue;
@@ -3967,6 +3989,7 @@
             row.brightness = item.brightness;
             row.contrast = item.contrast;
             row.backgroundClean = item.backgroundClean;
+            row.rotation = item.rotation;
             row.invert = item.invert;
           }
           for (const item of normalized.panels) {
@@ -4076,7 +4099,7 @@
           ["schema_version", true], ["project_id", false], ["project_modified_at_utc", false], ["artifact_stem", false], ["expected_png_file", false], ["expected_svg_file", false], ["exported_at_utc", false], ["row_order", true], ["protein", false], ["molecular_weight", false],
           ["source_file", false], ["source_type", false], ["source_bytes", true], ["source_last_modified_utc", false], ["source_sha256", false], ["source_width_px", true], ["source_height_px", true],
           ["crop_x_px", true], ["crop_y_px", true], ["crop_width_px", true], ["crop_height_px", true], ["crop_ratio", true],
-          ["brightness_percent", true], ["contrast_percent", true], ["background_clean_percent", true], ["inverted", false], ["layout_mode", false], ["lane_count", true],
+          ["brightness_percent", true], ["contrast_percent", true], ["background_clean_percent", true], ["rotation_degrees", true], ["inverted", false], ["layout_mode", false], ["lane_count", true],
           ["groups_json", false], ["lane_labels_json", false], ["footer_label", false], ["font_family", false], ["label_size_logical_px", true], ["label_size_pt", true], ["strip_height_cm", true],
           ["lane_width_cm", true], ["row_gap_cm", true], ["figure_width_cm", true], ["figure_height_cm", true], ["selected_png_dpi", true],
           ["show_mw", false], ["show_lanes", false], ["show_border", false], ["show_group_brackets", false], ["row_key", false], ["quant_role", false], ["membrane_id", false], ["non_adjacent_lanes", false], ["splice_boundaries_json", false], ["export_profile", false]
@@ -4111,6 +4134,7 @@
             brightness_percent: row.brightness,
             contrast_percent: row.contrast,
             background_clean_percent: row.backgroundClean || 0,
+            rotation_degrees: row.rotation || 0,
             inverted: row.invert,
             layout_mode: state.layoutMode,
             lane_count: lanes,
@@ -4192,6 +4216,7 @@
             brightness: row.brightness,
             contrast: row.contrast,
             backgroundClean: row.backgroundClean || 0,
+            rotation: row.rotation || 0,
             invert: row.invert
           }
         };
@@ -4199,6 +4224,7 @@
         $("#editBrightness").value = row.brightness;
         $("#editContrast").value = row.contrast;
         $("#editBackgroundClean").value = row.backgroundClean || 0;
+        $("#editRotation").value = row.rotation || 0;
         $("#editInvert").checked = row.invert;
         $("#editorHelp").textContent = `已锁定 ${totalSamples()}:1 · ${totalSamples()} 个泳道；框内拖动可移动，重新框选请点击“重新框选”。`;
         populateCopySources();
@@ -4279,10 +4305,12 @@
         state.editor.draft.brightness = source.brightness;
         state.editor.draft.contrast = source.contrast;
         state.editor.draft.backgroundClean = source.backgroundClean || 0;
+        state.editor.draft.rotation = source.rotation || 0;
         state.editor.draft.invert = source.invert;
         $("#editBrightness").value = source.brightness;
         $("#editContrast").value = source.contrast;
         $("#editBackgroundClean").value = source.backgroundClean || 0;
+        $("#editRotation").value = source.rotation || 0;
         $("#editInvert").checked = source.invert;
         syncEditorLabels();
         renderEditor();
@@ -4320,7 +4348,7 @@
         const y = imageY + crop.y * scale;
         const w = crop.w * scale;
         const h = crop.h * scale;
-        if (draft.backgroundClean > 0) drawContainedImage(ctx, { ...row, ...draft, crop }, x, y, w, h);
+        if (draft.backgroundClean > 0 || draft.rotation) drawContainedImage(ctx, { ...row, ...draft, crop }, x, y, w, h);
         ctx.fillStyle = "rgba(5, 14, 27, .5)";
         ctx.beginPath();
         ctx.rect(imageX, imageY, imageWidth, imageHeight);
@@ -4476,6 +4504,7 @@
         $("#editBrightnessValue").textContent = `${$("#editBrightness").value}%`;
         $("#editContrastValue").textContent = `${$("#editContrast").value}%`;
         $("#editBackgroundCleanValue").textContent = Number($("#editBackgroundClean").value) ? `${$("#editBackgroundClean").value}%` : "关闭";
+        $("#editRotationValue").textContent = `${Number($("#editRotation").value).toFixed(1)}°`;
       }
 
       function updateEditorDraft() {
@@ -4483,9 +4512,32 @@
         state.editor.draft.brightness = Number($("#editBrightness").value);
         state.editor.draft.contrast = Number($("#editContrast").value);
         state.editor.draft.backgroundClean = Number($("#editBackgroundClean").value);
+        state.editor.draft.rotation = Number($("#editRotation").value);
         state.editor.draft.invert = $("#editInvert").checked;
         syncEditorLabels();
         renderEditor();
+      }
+
+      function autoStraightenEditor() {
+        const row = editorRow();
+        const crop = state.editor?.draft.crop;
+        if (!row?.image || !crop) return;
+        const width = Math.max(80, Math.min(800, Math.round(crop.w)));
+        const height = Math.max(8, Math.round(width * crop.h / crop.w));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        const draft = state.editor.draft;
+        context.filter = `brightness(${draft.brightness}%) contrast(${draft.contrast}%) invert(${draft.invert ? 100 : 0}%)`;
+        context.drawImage(row.image, crop.x, crop.y, crop.w, crop.h, 0, 0, width, height);
+        const imageData = context.getImageData(0, 0, width, height);
+        const angle = window.WBCore.estimateStripRotation({ rgba: imageData.data, width, height, maxDegrees: 8 });
+        state.editor.draft.rotation = angle;
+        $("#editRotation").value = String(angle);
+        syncEditorLabels();
+        renderEditor();
+        toast(angle ? `已估算整体拉直角度 ${angle.toFixed(1)}°，请核对后应用` : "未检测到需要校正的共同倾斜");
       }
 
       function applyEditor() {
@@ -4496,6 +4548,7 @@
         row.brightness = draft.brightness;
         row.contrast = draft.contrast;
         row.backgroundClean = draft.backgroundClean;
+        row.rotation = draft.rotation;
         row.invert = draft.invert;
         state.demoLoaded = false;
         markDirty();
@@ -4752,7 +4805,9 @@
       $("#editBrightness").addEventListener("input", updateEditorDraft);
       $("#editContrast").addEventListener("input", updateEditorDraft);
       $("#editBackgroundClean").addEventListener("input", updateEditorDraft);
+      $("#editRotation").addEventListener("input", updateEditorDraft);
       $("#editInvert").addEventListener("change", updateEditorDraft);
+      $("#autoStraighten").addEventListener("click", autoStraightenEditor);
       $("#newCrop").addEventListener("click", () => {
         if (!state.editor) return;
         state.editor.drawMode = !state.editor.drawMode;

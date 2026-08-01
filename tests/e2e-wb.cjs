@@ -137,6 +137,8 @@ async function waitForServer(url) {
     await page.locator("#imageEditor").waitFor({ state: "visible" });
     await page.locator("#editBackgroundClean").fill("60");
     assert.equal(await page.locator("#editBackgroundCleanValue").textContent(), "60%");
+    await page.locator("#editRotation").fill("-2.3");
+    assert.equal(await page.locator("#editRotationValue").textContent(), "-2.3°");
     await page.locator("#applyEditor").click();
     await page.locator("#imageEditor").waitFor({ state: "hidden" });
 
@@ -295,6 +297,7 @@ async function waitForServer(url) {
     assert.equal(project.settings.showGroupBrackets, false);
     assert.equal(project.rows.length, 2);
     assert.equal(project.rows[1].backgroundClean, 60);
+    assert.equal(project.rows[1].rotation, -2.3);
     assert.equal(project.panels.length, 1);
     assert.equal(project.settings.quant.rois[targetKey].method, "row-contrast-v1");
     assert.equal(project.settings.quant.rois[loadingKey].method, "row-contrast-v1");
@@ -304,6 +307,7 @@ async function waitForServer(url) {
     await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 2);
     await page.locator("#rowList .protein-row").nth(1).getByRole("button", { name: "裁剪/调图" }).click();
     assert.equal(await page.locator("#editBackgroundClean").inputValue(), "60");
+    assert.equal(await page.locator("#editRotation").inputValue(), "-2.3");
     await page.locator("#cancelEditor").click();
     await page.locator("#openQuant").click();
     await page.locator("#quantDialog").waitFor({ state: "visible" });
