@@ -5,7 +5,7 @@
 })(typeof globalThis === "undefined" ? this : globalThis, function () {
   "use strict";
 
-  const ENGINE_VERSION = "2.1.0";
+  const ENGINE_VERSION = "2.2.0";
   const encoder = new TextEncoder();
 
   function bytes(value) {
@@ -679,6 +679,74 @@
     });
   }
 
+  function histogramQuantile(values, quantile) {
+    const histogram = new Uint32Array(256);
+    values.forEach((value) => { histogram[Math.max(0, Math.min(255, Math.round(value)))] += 1; });
+    const target = Math.max(0, Math.min(values.length - 1, Math.floor(values.length * quantile)));
+    let cumulative = 0;
+    for (let value = 0; value < histogram.length; value += 1) {
+      cumulative += histogram[value];
+      if (cumulative > target) return value;
+    }
+    return 255;
+  }
+
+  function smoothLine(values, radius) {
+    const output = new Float32Array(values.length);
+    const prefix = new Float64Array(values.length + 1);
+    for (let index = 0; index < values.length; index += 1) prefix[index + 1] = prefix[index] + values[index];
+    for (let index = 0; index < values.length; index += 1) {
+      const start = Math.max(0, index - radius);
+      const end = Math.min(values.length, index + radius + 1);
+      output[index] = (prefix[end] - prefix[start]) / (end - start);
+    }
+    return output;
+  }
+
+  function flattenDisplayBackground({ rgba, width, height, strength = 0 }) {
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) throw new Error("背景校正尺寸无效");
+    if (!rgba || rgba.length !== width * height * 4) throw new Error("背景校正像素长度无效");
+    const amount = Math.max(0, Math.min(1, Number(strength) / 100));
+    const output = new Uint8ClampedArray(rgba);
+    if (!amount) return output;
+
+    const gray = new Uint8Array(width * height);
+    for (let pixel = 0; pixel < gray.length; pixel += 1) {
+      const offset = pixel * 4;
+      gray[pixel] = Math.round(output[offset] * .2126 + output[offset + 1] * .7152 + output[offset + 2] * .0722);
+    }
+    const columns = new Float32Array(width);
+    const rows = new Float32Array(height);
+    const samples = [];
+    for (let x = 0; x < width; x += 1) {
+      samples.length = 0;
+      for (let y = 0; y < height; y += 1) samples.push(gray[y * width + x]);
+      columns[x] = histogramQuantile(samples, .82);
+    }
+    for (let y = 0; y < height; y += 1) {
+      samples.length = 0;
+      const offset = y * width;
+      for (let x = 0; x < width; x += 1) samples.push(gray[offset + x]);
+      rows[y] = histogramQuantile(samples, .82);
+    }
+    const smoothColumns = smoothLine(columns, Math.max(2, Math.round(width / 45)));
+    const smoothRows = smoothLine(rows, Math.max(1, Math.round(height / 12)));
+    const globalBackground = histogramQuantile(gray, .82);
+    const targetBackground = 248;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const pixel = y * width + x;
+        const localBackground = smoothColumns[x] + smoothRows[y] - globalBackground;
+        const correction = amount * (targetBackground - localBackground);
+        const offset = pixel * 4;
+        output[offset] = output[offset] + correction;
+        output[offset + 1] = output[offset + 1] + correction;
+        output[offset + 2] = output[offset + 2] + correction;
+      }
+    }
+    return output;
+  }
+
   function runIntegrityChecks(input) {
     const errors = [];
     const warnings = [];
@@ -691,7 +759,7 @@
       if (!row.hasSource) errors.push({ code: "SOURCE_MISSING", message: `${label} 缺少原始图片。` });
       if (!row.sha256) warnings.push({ code: "HASH_MISSING", message: `${label} 尚无 SHA-256 校验值。` });
       if (!row.mw) warnings.push({ code: "MW_MISSING", message: `${label} 未填写分子量。` });
-      if (row.brightness !== 100 || row.contrast !== 100 || row.invert) warnings.push({ code: "IMAGE_ADJUSTED", message: `${label} 使用了亮度、对比度或反相调整；请确认调整应用于整张图。` });
+      if (row.brightness !== 100 || row.contrast !== 100 || row.invert || row.backgroundClean > 0) warnings.push({ code: "IMAGE_ADJUSTED", message: `${label} 使用了显示调整；请确认调整统一应用于整块裁剪区域，并保留原始图。` });
       if (row.nonAdjacent && !(row.splices || []).length) errors.push({ code: "SPLICE_UNMARKED", message: `${label} 标记为非相邻泳道，但没有填写拼接边界。` });
       if ((row.splices || []).some((boundary) => !Number.isInteger(boundary) || boundary < 1 || boundary >= input.laneCount)) errors.push({ code: "SPLICE_INVALID", message: `${label} 的拼接边界超出泳道范围。` });
       if (row.signalClippedFraction > 0) warnings.push({ code: row.signalClippedFraction >= 0.01 ? "SATURATION_HIGH" : "SATURATION_PRESENT", message: `${label} 的已确认条带 ROI 中有 ${(row.signalClippedFraction * 100).toFixed(2)}% 端点像素。` });
@@ -732,6 +800,7 @@
     normalizeMeasurements,
     prismColumnTables,
     summarizeNormalized,
+    flattenDisplayBackground,
     runIntegrityChecks,
   };
 });

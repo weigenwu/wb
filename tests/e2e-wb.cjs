@@ -133,6 +133,13 @@ async function waitForServer(url) {
     await rows.nth(1).locator(".row-science select").selectOption("target");
     await rows.nth(1).locator(".row-science input").nth(0).fill("membrane-1");
 
+    await rows.nth(1).getByRole("button", { name: "裁剪/调图" }).click();
+    await page.locator("#imageEditor").waitFor({ state: "visible" });
+    await page.locator("#editBackgroundClean").fill("60");
+    assert.equal(await page.locator("#editBackgroundCleanValue").textContent(), "60%");
+    await page.locator("#applyEditor").click();
+    await page.locator("#imageEditor").waitFor({ state: "hidden" });
+
     await rows.nth(0).locator(".row-science select").selectOption("target");
     await rows.nth(1).locator(".row-science select").selectOption("loading");
     await page.locator("#openQuant").click();
@@ -284,9 +291,10 @@ async function waitForServer(url) {
     assert.match(projectFile.suggestedFilename(), /project\.wb-project$/);
     const projectPath = await projectFile.path();
     const project = JSON.parse(fs.readFileSync(projectPath, "utf8"));
-    assert.equal(project.version, 3);
+    assert.equal(project.version, 4);
     assert.equal(project.settings.showGroupBrackets, false);
     assert.equal(project.rows.length, 2);
+    assert.equal(project.rows[1].backgroundClean, 60);
     assert.equal(project.panels.length, 1);
     assert.equal(project.settings.quant.rois[targetKey].method, "row-contrast-v1");
     assert.equal(project.settings.quant.rois[loadingKey].method, "row-contrast-v1");
@@ -294,6 +302,9 @@ async function waitForServer(url) {
     await page.locator("#newProject").click();
     await page.locator("#projectFile").setInputFiles(projectPath);
     await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 2);
+    await page.locator("#rowList .protein-row").nth(1).getByRole("button", { name: "裁剪/调图" }).click();
+    assert.equal(await page.locator("#editBackgroundClean").inputValue(), "60");
+    await page.locator("#cancelEditor").click();
     await page.locator("#openQuant").click();
     await page.locator("#quantDialog").waitFor({ state: "visible" });
     assert.equal(await page.locator('#sampleMapBody [data-map="sampleId"]').first().inputValue(), "C1", "v2 import must restore the sample map");

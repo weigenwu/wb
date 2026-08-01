@@ -724,6 +724,7 @@
         <h3>图像调整</h3>
         <div class="range-field"><label for="editBrightness">亮度<input id="editBrightness" type="range" min="50" max="160" value="100"></label><span class="range-value" id="editBrightnessValue">100%</span></div>
         <div class="range-field"><label for="editContrast">对比度<input id="editContrast" type="range" min="50" max="200" value="100"></label><span class="range-value" id="editContrastValue">100%</span></div>
+        <div class="range-field"><label for="editBackgroundClean">白场背景展平<input id="editBackgroundClean" type="range" min="0" max="100" step="5" value="0"></label><span class="range-value" id="editBackgroundCleanValue">关闭</span></div>
         <div class="toggle-list"><label class="toggle"><input id="editInvert" type="checkbox"> 黑白反相</label></div>
         <div class="inline-actions"><button class="button small" id="newCrop" type="button">重新框选</button><button class="button small" id="resetCrop" type="button">重置为最大比例区域</button></div>
         <div class="editor-copy">
@@ -731,7 +732,7 @@
           <select id="copyFromRow"></select>
           <button class="button small" id="copyRowSettings" type="button">复制到当前行</button>
         </div>
-        <p class="field-help">调整只作用于导出的副本。为保持科研图像可追溯性，请避免过度增强。</p>
+        <p class="field-help">背景展平只适用于黑条带、白背景，并统一作用于整块裁剪区域；灰度定量仍读取原始 TIFF。调整只作用于导出的副本，请避免过度增强。</p>
       </div>
     </div>
     <div class="dialog-foot">
@@ -830,8 +831,8 @@
       const MAX_PIXELS = 50_000_000;
       const MAX_PROJECT_FILE_BYTES = 162 * 1024 * 1024;
       const PROJECT_KIND = "blotboard-project";
-      const PROJECT_VERSION = 3;
-      const SUPPORTED_PROJECT_VERSIONS = [1, 2, PROJECT_VERSION];
+      const PROJECT_VERSION = 4;
+      const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, PROJECT_VERSION];
       const PROJECT_DB = "blotboard-wb";
       const PROJECT_STORE = "projects";
       const AUTOSAVE_KEY = "current";
@@ -1310,6 +1311,7 @@
           crop: null,
           brightness: 100,
           contrast: 100,
+          backgroundClean: 0,
           invert: false,
           bytes: file.size,
           objectUrl: src
@@ -1319,7 +1321,7 @@
       }
 
       function blankRow() {
-        return { id: ++idCounter, rowKey: newRowKey(), name: `Protein ${idCounter}`, mw: "", role: "target", membraneId: "", nonAdjacent: false, splices: [], sourceFile: null, sourceName: "", sourceType: "", sourceBytes: 0, sourceLastModified: 0, sourceSha256: "", src: "", image: null, crop: null, brightness: 100, contrast: 100, invert: false, bytes: 0, objectUrl: null };
+        return { id: ++idCounter, rowKey: newRowKey(), name: `Protein ${idCounter}`, mw: "", role: "target", membraneId: "", nonAdjacent: false, splices: [], sourceFile: null, sourceName: "", sourceType: "", sourceBytes: 0, sourceLastModified: 0, sourceSha256: "", src: "", image: null, crop: null, brightness: 100, contrast: 100, backgroundClean: 0, invert: false, bytes: 0, objectUrl: null };
       }
 
       function demoStrip(intensities, seed) {
@@ -1406,7 +1408,7 @@
           const sourceName = `${name.toLowerCase().replace(/\s+/g, "-")}-example.png`;
           const sourceBlob = dataUrlToBlob(src);
           const sourceFile = new File([sourceBlob], sourceName, { type: "image/png", lastModified: 0 });
-          const row = { id: ++idCounter, rowKey: newRowKey(), name, mw, role: name === "Protein B" ? "loading" : "target", membraneId: "example-1", nonAdjacent: false, splices: [], sourceFile, sourceName, sourceType: "image/png", sourceBytes: sourceFile.size, sourceLastModified: 0, sourceSha256: await sha256Blob(sourceFile), src, image, crop: null, brightness: 100, contrast: 110, invert: false, bytes: sourceFile.size, objectUrl: null };
+          const row = { id: ++idCounter, rowKey: newRowKey(), name, mw, role: name === "Protein B" ? "loading" : "target", membraneId: "example-1", nonAdjacent: false, splices: [], sourceFile, sourceName, sourceType: "image/png", sourceBytes: sourceFile.size, sourceLastModified: 0, sourceSha256: await sha256Blob(sourceFile), src, image, crop: null, brightness: 100, contrast: 110, backgroundClean: 0, invert: false, bytes: sourceFile.size, objectUrl: null };
           row.crop = maximumAspectCrop(row);
           return row;
         }));
@@ -1746,8 +1748,26 @@
         ctx.beginPath();
         ctx.rect(x, y, width, height);
         ctx.clip();
-        ctx.filter = `brightness(${row.brightness}%) contrast(${row.contrast}%) invert(${row.invert ? 100 : 0}%)`;
-        ctx.drawImage(row.image, crop.x, crop.y, crop.w, crop.h, x, drawY, width, drawHeight);
+        const backgroundClean = Number(row.backgroundClean) || 0;
+        if (backgroundClean > 0) {
+          const transformScale = Math.max(1, Math.abs(ctx.getTransform().a) || 1);
+          const processedWidth = Math.max(1, Math.min(Math.ceil(crop.w), Math.ceil(width * transformScale)));
+          const processedHeight = Math.max(1, Math.round(processedWidth * crop.h / crop.w));
+          const processed = document.createElement("canvas");
+          processed.width = processedWidth;
+          processed.height = processedHeight;
+          const processedContext = processed.getContext("2d", { willReadFrequently: true });
+          processedContext.filter = `brightness(${row.brightness}%) contrast(${row.contrast}%) invert(${row.invert ? 100 : 0}%)`;
+          processedContext.drawImage(row.image, crop.x, crop.y, crop.w, crop.h, 0, 0, processedWidth, processedHeight);
+          const imageData = processedContext.getImageData(0, 0, processedWidth, processedHeight);
+          imageData.data.set(window.WBCore.flattenDisplayBackground({ rgba: imageData.data, width: processedWidth, height: processedHeight, strength: backgroundClean }));
+          processedContext.putImageData(imageData, 0, 0);
+          ctx.filter = "none";
+          ctx.drawImage(processed, x, drawY, width, drawHeight);
+        } else {
+          ctx.filter = `brightness(${row.brightness}%) contrast(${row.contrast}%) invert(${row.invert ? 100 : 0}%)`;
+          ctx.drawImage(row.image, crop.x, crop.y, crop.w, crop.h, x, drawY, width, drawHeight);
+        }
         ctx.restore();
         return true;
       }
@@ -2228,6 +2248,7 @@
             sha256: row.sourceSha256,
             brightness: row.brightness,
             contrast: row.contrast,
+            backgroundClean: row.backgroundClean || 0,
             invert: row.invert,
             role: row.role,
             membraneId: row.membraneId,
@@ -2355,7 +2376,7 @@
             figure: { stem: artifactStem(), dpi: state.pngDpi, profile: state.exportProfile, metrics: currentFigureMetrics() },
             groups: state.groups,
             lane_labels: resolvedLaneLabels(),
-            rows: state.rows.map((row, index) => ({ order: index + 1, row_key: row.rowKey, protein: row.name, molecular_weight: row.mw, role: row.role, membrane_id: row.membraneId, source_file: row.sourceName, source_sha256: row.sourceSha256, splices: row.splices || [], crop: row.crop, brightness: row.brightness, contrast: row.contrast, invert: row.invert })),
+            rows: state.rows.map((row, index) => ({ order: index + 1, row_key: row.rowKey, protein: row.name, molecular_weight: row.mw, role: row.role, membrane_id: row.membraneId, source_file: row.sourceName, source_sha256: row.sourceSha256, splices: row.splices || [], crop: row.crop, brightness: row.brightness, contrast: row.contrast, background_clean: row.backgroundClean || 0, invert: row.invert })),
             panels: state.panels.map((panel, index) => ({ order: index + 1, key: panel.key, type: panel.type, label: panel.label, source_file: panel.sourceFile?.name || "current WB figure" })),
             preflight: report,
           };
@@ -3485,7 +3506,7 @@
           savedAt: new Date().toISOString(),
           projectId: state.projectId,
           layout: layoutTemplate(),
-          rows: state.rows.map((row) => ({ rowKey: row.rowKey, name: row.name, mw: row.mw, role: row.role, membraneId: row.membraneId, nonAdjacent: row.nonAdjacent, splices: row.splices, crop: row.crop, brightness: row.brightness, contrast: row.contrast, invert: row.invert })),
+          rows: state.rows.map((row) => ({ rowKey: row.rowKey, name: row.name, mw: row.mw, role: row.role, membraneId: row.membraneId, nonAdjacent: row.nonAdjacent, splices: row.splices, crop: row.crop, brightness: row.brightness, contrast: row.contrast, backgroundClean: row.backgroundClean || 0, invert: row.invert })),
           quant: { sampleMap: state.quant.sampleMap, rois: state.quant.rois, loadingKey: state.quant.loadingKey, controlGroup: state.quant.controlGroup, locked: state.quant.locked },
         };
       }
@@ -3521,6 +3542,7 @@
           if (saved.crop) row.crop = validatedRestoredCrop(row, saved.crop);
           row.brightness = saved.brightness;
           row.contrast = saved.contrast;
+          row.backgroundClean = saved.backgroundClean || 0;
           row.invert = saved.invert;
         });
         state.quant = { ...state.quant, ...(revision.quant || {}), results: null };
@@ -3673,6 +3695,7 @@
             crop: row.crop ? { ...row.crop } : null,
             brightness: row.brightness,
             contrast: row.contrast,
+            backgroundClean: row.backgroundClean || 0,
             invert: row.invert,
             source: row.sourceFile ? {
               name: row.sourceName || row.sourceFile.name,
@@ -3837,6 +3860,7 @@
             crop: row.crop,
             brightness: finiteInRange(row.brightness, 50, 160, "亮度"),
             contrast: finiteInRange(row.contrast, 50, 200, "对比度"),
+            backgroundClean: project.version >= 4 ? finiteInRange(row.backgroundClean, 0, 100, "白场背景展平") : 0,
             invert: booleanValue(row.invert, "反相开关"),
             source: row.source
           };
@@ -3919,6 +3943,7 @@
               row.splices = item.splices;
               row.brightness = item.brightness;
               row.contrast = item.contrast;
+              row.backgroundClean = item.backgroundClean;
               row.invert = item.invert;
               temporaryRows.push(row);
               continue;
@@ -3941,6 +3966,7 @@
             row.crop = validatedRestoredCrop(row, item.crop);
             row.brightness = item.brightness;
             row.contrast = item.contrast;
+            row.backgroundClean = item.backgroundClean;
             row.invert = item.invert;
           }
           for (const item of normalized.panels) {
@@ -4050,7 +4076,7 @@
           ["schema_version", true], ["project_id", false], ["project_modified_at_utc", false], ["artifact_stem", false], ["expected_png_file", false], ["expected_svg_file", false], ["exported_at_utc", false], ["row_order", true], ["protein", false], ["molecular_weight", false],
           ["source_file", false], ["source_type", false], ["source_bytes", true], ["source_last_modified_utc", false], ["source_sha256", false], ["source_width_px", true], ["source_height_px", true],
           ["crop_x_px", true], ["crop_y_px", true], ["crop_width_px", true], ["crop_height_px", true], ["crop_ratio", true],
-          ["brightness_percent", true], ["contrast_percent", true], ["inverted", false], ["layout_mode", false], ["lane_count", true],
+          ["brightness_percent", true], ["contrast_percent", true], ["background_clean_percent", true], ["inverted", false], ["layout_mode", false], ["lane_count", true],
           ["groups_json", false], ["lane_labels_json", false], ["footer_label", false], ["font_family", false], ["label_size_logical_px", true], ["label_size_pt", true], ["strip_height_cm", true],
           ["lane_width_cm", true], ["row_gap_cm", true], ["figure_width_cm", true], ["figure_height_cm", true], ["selected_png_dpi", true],
           ["show_mw", false], ["show_lanes", false], ["show_border", false], ["show_group_brackets", false], ["row_key", false], ["quant_role", false], ["membrane_id", false], ["non_adjacent_lanes", false], ["splice_boundaries_json", false], ["export_profile", false]
@@ -4084,6 +4110,7 @@
             crop_ratio: crop ? decimal(crop.w / crop.h) : "",
             brightness_percent: row.brightness,
             contrast_percent: row.contrast,
+            background_clean_percent: row.backgroundClean || 0,
             inverted: row.invert,
             layout_mode: state.layoutMode,
             lane_count: lanes,
@@ -4164,12 +4191,14 @@
             crop: fitAspectCrop(row, row.crop),
             brightness: row.brightness,
             contrast: row.contrast,
+            backgroundClean: row.backgroundClean || 0,
             invert: row.invert
           }
         };
         $("#editorTitle").textContent = `编辑条带图 · ${row.name}`;
         $("#editBrightness").value = row.brightness;
         $("#editContrast").value = row.contrast;
+        $("#editBackgroundClean").value = row.backgroundClean || 0;
         $("#editInvert").checked = row.invert;
         $("#editorHelp").textContent = `已锁定 ${totalSamples()}:1 · ${totalSamples()} 个泳道；框内拖动可移动，重新框选请点击“重新框选”。`;
         populateCopySources();
@@ -4249,14 +4278,16 @@
         state.editor.draft.crop = fitAspectCrop(target, mapped);
         state.editor.draft.brightness = source.brightness;
         state.editor.draft.contrast = source.contrast;
+        state.editor.draft.backgroundClean = source.backgroundClean || 0;
         state.editor.draft.invert = source.invert;
         $("#editBrightness").value = source.brightness;
         $("#editContrast").value = source.contrast;
+        $("#editBackgroundClean").value = source.backgroundClean || 0;
         $("#editInvert").checked = source.invert;
         syncEditorLabels();
         renderEditor();
         syncCropAccessibility(true);
-        toast("已复制裁剪、亮度、对比度和反相设置");
+        toast("已复制裁剪和全部显示调整");
       }
 
       function renderEditor() {
@@ -4289,6 +4320,7 @@
         const y = imageY + crop.y * scale;
         const w = crop.w * scale;
         const h = crop.h * scale;
+        if (draft.backgroundClean > 0) drawContainedImage(ctx, { ...row, ...draft, crop }, x, y, w, h);
         ctx.fillStyle = "rgba(5, 14, 27, .5)";
         ctx.beginPath();
         ctx.rect(imageX, imageY, imageWidth, imageHeight);
@@ -4443,12 +4475,14 @@
       function syncEditorLabels() {
         $("#editBrightnessValue").textContent = `${$("#editBrightness").value}%`;
         $("#editContrastValue").textContent = `${$("#editContrast").value}%`;
+        $("#editBackgroundCleanValue").textContent = Number($("#editBackgroundClean").value) ? `${$("#editBackgroundClean").value}%` : "关闭";
       }
 
       function updateEditorDraft() {
         if (!state.editor) return;
         state.editor.draft.brightness = Number($("#editBrightness").value);
         state.editor.draft.contrast = Number($("#editContrast").value);
+        state.editor.draft.backgroundClean = Number($("#editBackgroundClean").value);
         state.editor.draft.invert = $("#editInvert").checked;
         syncEditorLabels();
         renderEditor();
@@ -4461,6 +4495,7 @@
         row.crop = fitAspectCrop(row, draft.crop);
         row.brightness = draft.brightness;
         row.contrast = draft.contrast;
+        row.backgroundClean = draft.backgroundClean;
         row.invert = draft.invert;
         state.demoLoaded = false;
         markDirty();
@@ -4716,6 +4751,7 @@
       $("#copyRowSettings").addEventListener("click", copyEditorSettings);
       $("#editBrightness").addEventListener("input", updateEditorDraft);
       $("#editContrast").addEventListener("input", updateEditorDraft);
+      $("#editBackgroundClean").addEventListener("input", updateEditorDraft);
       $("#editInvert").addEventListener("change", updateEditorDraft);
       $("#newCrop").addEventListener("click", () => {
         if (!state.editor) return;

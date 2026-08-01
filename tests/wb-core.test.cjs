@@ -245,6 +245,29 @@ function testDarkAndBrightRois() {
   }), /must not overlap/);
 }
 
+function testDisplayBackgroundFlattening() {
+  const width = 60;
+  const height = 18;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      let value = 150 + Math.round(x * 1.4) + Math.round(y * .7);
+      if (y >= 7 && y <= 10 && ((x >= 8 && x <= 14) || (x >= 28 && x <= 34) || (x >= 46 && x <= 52))) value -= 95;
+      rgba[offset] = value;
+      rgba[offset + 1] = value;
+      rgba[offset + 2] = value;
+      rgba[offset + 3] = 255;
+    }
+  }
+  const flattened = core.flattenDisplayBackground({ rgba, width, height, strength: 100 });
+  const background = (x) => flattened[(2 * width + x) * 4];
+  const band = (x) => flattened[(8 * width + x) * 4];
+  assert.ok(Math.abs(background(4) - background(55)) < 12, "low-frequency white-field gradient should be flattened");
+  assert.ok(background(11) - band(11) > 55, "dark band contrast should remain visible after display correction");
+  assert.deepEqual(core.flattenDisplayBackground({ rgba, width, height, strength: 0 }), rgba, "zero strength must leave display pixels unchanged");
+}
+
 function testNormalizationAndPrism() {
   const rows = core.normalizeMeasurements(
     [{ key: "her2", name: "HER2", lanes: [measurement(100), measurement(300), measurement(200), measurement(800)] }],
@@ -316,8 +339,8 @@ function testPwaShell() {
   assert.match(html, /navigator\.serviceWorker\.register\("\.\/sw\.js"\)/);
   const worker = fs.readFileSync(path.join(root, "sw.js"), "utf8");
   assert.ok(worker.includes("./wb-core.js"));
-  assert.ok(worker.includes("figurelab-wb-v2.1.3"));
-  ["sampleMapText", "suggestRois", "exposureCheck", "downloadExposureReport"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
+  assert.ok(worker.includes("figurelab-wb-v2.2.0"));
+  ["sampleMapText", "suggestRois", "exposureCheck", "downloadExposureReport", "editBackgroundClean"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
 }
 
 function testUnifiedSuiteShell() {
@@ -343,6 +366,7 @@ function testUnifiedSuiteShell() {
   testRoiSuggestions,
   testExposureSeries,
   testDarkAndBrightRois,
+  testDisplayBackgroundFlattening,
   testNormalizationAndPrism,
   testQc,
   testPwaShell,

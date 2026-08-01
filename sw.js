@@ -1,4 +1,4 @@
-const CACHE_NAME = "figurelab-wb-v2.1.3";
+const CACHE_NAME = "figurelab-wb-v2.2.0";
 const PRECACHE = [
   "./",
   "./index.html",
