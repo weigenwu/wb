@@ -413,35 +413,91 @@ async function waitForServer(url) {
     const cleavageDenominatorKey = await page.locator("#quantDenominator").inputValue();
     assert.ok(cleavageNumeratorKey && cleavageDenominatorKey && cleavageNumeratorKey !== cleavageDenominatorKey);
 
-    const placeGuide = async (bandCenterY) => {
+    const dragGuide = async (bandCenterY) => {
       const canvas = page.locator("#quantCanvas");
       const box = await canvas.boundingBox();
       assert.ok(box, "quantification canvas must be visible for horizontal guide placement");
-      await page.locator("#guideRois").click();
       await page.mouse.move(box.x + box.width / 2, box.y + 10);
       await page.mouse.down();
       await page.mouse.move(box.x + box.width / 2, box.y + bandCenterY);
       await page.mouse.up();
-      await page.waitForFunction(() => document.querySelector("#quantStatus")?.textContent.includes("横线定位 3 条泳道"));
     };
 
+    assert.ok(!(await page.locator("#quantMapLocked").isChecked()), "paired-band quick measurements must not require a locked sample map");
+    assert.ok(await page.locator('#sampleMapBody [data-map="sampleId"]').first().isEnabled());
     await page.locator("#quantPolarity").selectOption("bright");
     await page.locator("#quantRoiHeight").fill("12");
-    await placeGuide(29);
+    await page.locator("#initializeRois").click();
     const roiOverlay = await page.locator("#quantCanvas").evaluate((canvas) => canvas.toDataURL());
     await page.locator("#guideRois").click();
     const clearGuideView = await page.locator("#quantCanvas").evaluate((canvas) => canvas.toDataURL());
     assert.notEqual(clearGuideView, roiOverlay, "line-guide mode must hide old ROI boxes and lane-number labels");
     await page.locator("#quantCanvas").press("Escape");
     assert.equal(await page.locator("#quantCanvas").evaluate((canvas) => canvas.toDataURL()), roiOverlay, "cancelling the guide must restore the existing ROI overlay");
-    await page.locator("#quantMapLocked").check();
-    assert.ok(await page.locator('#sampleMapBody [data-map="sampleId"]').first().isDisabled());
-    await page.locator("#calculateQuant").click();
+
+    await page.locator("#guideRois").click();
+    await dragGuide(29);
     await page.waitForFunction((key) => document.querySelector("#quantRow")?.value === key
-      && document.querySelector("#quantStatus")?.textContent.includes("请先按泳道等宽初始化"), cleavageDenominatorKey);
+      && document.querySelectorAll("#quantQuickResults thead th").length === 4
+      && document.querySelectorAll("#quantQuickResults tbody tr").length === 3, cleavageDenominatorKey);
+    const numeratorCorrected = await page.locator("#quantQuickResults tbody tr td:nth-child(2)").allTextContents();
+    assert.ok(numeratorCorrected.every((value) => Number.isFinite(Number(value)) && Number(value) > 0), "the first guide must immediately show a positive background-corrected value for every lane");
+
+    await page.locator("#quantPolarity").selectOption("dark");
+    assert.equal(await page.locator("#quantQuickResults tbody tr").count(), 0, "changing polarity must discard quick measurements made with the old background strategy");
+    assert.match(await page.locator("#quantStatus").textContent(), /重新拉线/);
+    assert.equal(await page.locator("#quantResults tbody tr").count(), 0, "changing polarity must not retain formal results");
+    await page.locator("#quantRow").selectOption(cleavageNumeratorKey);
+    await page.waitForFunction((key) => document.querySelector("#quantRow")?.value === key
+      && document.querySelector("#quantStatus")?.textContent.includes("直接在条带中心"), cleavageNumeratorKey);
     await page.locator("#quantPolarity").selectOption("bright");
     await page.locator("#quantRoiHeight").fill("12");
-    await placeGuide(83);
+    await dragGuide(29);
+    await page.waitForFunction((key) => document.querySelector("#quantRow")?.value === key
+      && document.querySelectorAll("#quantQuickResults thead th").length === 4
+      && document.querySelectorAll("#quantQuickResults tbody tr").length === 3, cleavageDenominatorKey);
+
+    await page.locator("#quantRoiHeight").fill("12");
+    await dragGuide(83);
+    await page.waitForFunction(() => document.querySelectorAll("#quantQuickResults thead th").length === 5
+      && document.querySelectorAll("#quantQuickResults tbody tr").length === 3);
+    const quickPairValues = await page.locator("#quantQuickResults tbody tr").evaluateAll((rows) => rows.map((row) => [...row.cells].slice(1, 4).map((cell) => Number(cell.textContent))));
+    assert.ok(quickPairValues.every((values) => values.every((value) => Number.isFinite(value) && value > 0)), "the second guide must immediately show finite positive N, FL, and N/FL values for all lanes");
+
+    await page.locator("#quantManualDetails summary").click();
+    assert.ok(await page.locator("#quantManualDetails").evaluate((details) => details.open));
+    await page.locator("#quantLane").selectOption("0");
+    await page.locator("#quantRoiType").selectOption("background");
+    const manualCanvas = page.locator("#quantCanvas");
+    const manualBox = await manualCanvas.boundingBox();
+    const manualSize = await manualCanvas.evaluate((canvas) => ({ width: canvas.width, height: canvas.height }));
+    assert.ok(manualBox, "quantification canvas must remain visible for manual ROI adjustment");
+    await page.mouse.move(manualBox.x + manualBox.width / 2, manualBox.y + manualBox.height * 83 / manualSize.height);
+    await page.mouse.down();
+    await page.mouse.move(manualBox.x + manualBox.width / 2, manualBox.y + manualBox.height * 85 / manualSize.height);
+    await page.mouse.up();
+    assert.equal(await page.locator("#quantLane").inputValue(), "1", "an ROI hit must select the matching lane instead of starting a new row guide");
+    assert.equal(await page.locator("#quantRoiType").inputValue(), "band");
+    assert.notEqual(Number(await page.locator("#quantQuickResults tbody tr").nth(1).locator("td").nth(2).textContent()), quickPairValues[1][1], "manual band movement must immediately recompute its lane grayscale");
+
+    await page.locator("#quantRoiType").selectOption("background");
+    await manualCanvas.press("Shift+ArrowDown");
+    await manualCanvas.press("Shift+ArrowDown");
+    assert.equal(await page.locator("#quantQuickResults tbody tr").count(), 0, "overlapping band/background ROIs must clear stale quick values");
+    assert.match(await page.locator("#quantQuickResults").textContent(), /未计算/);
+    await dragGuide(83);
+    await page.waitForFunction(() => document.querySelectorAll("#quantQuickResults thead th").length === 5
+      && document.querySelectorAll("#quantQuickResults tbody tr").length === 3);
+    await page.locator("#quantManualDetails summary").click();
+
+    assert.equal(await page.locator("#quantResults tbody tr").count(), 0, "quick N/FL must not create formal grouped results before the sample map is locked");
+    assert.ok(await page.locator("#quantPlotTarget").isDisabled(), "quick N/FL must not enable the formal plot");
+    for (const selector of ["#exportQuantPlotPng", "#exportQuantCsv", "#exportQuantXlsx", "#exportPrism"]) {
+      assert.ok(await page.locator(selector).isDisabled(), `${selector} must stay unavailable until formal grouped results exist`);
+    }
+
+    await page.locator("#quantMapLocked").check();
+    assert.ok(await page.locator('#sampleMapBody [data-map="sampleId"]').first().isDisabled());
     await page.locator("#calculateQuant").click();
     try {
       await page.waitForFunction(() => document.querySelectorAll("#quantResults tbody tr").length === 3, null, { timeout: 10_000 });
@@ -452,6 +508,32 @@ async function waitForServer(url) {
     assert.match(await page.locator("#quantResults thead").textContent(), /N IntDen.*FL IntDen.*N\/FL.*相对对照 Fold/);
     const cleavageRatios = await page.locator("#quantResults tbody tr td:nth-child(9)").allTextContents();
     assert.ok(cleavageRatios.every((value) => Number.isFinite(Number(value)) && Number(value) > 0), "every included lane must have a finite positive N/FL ratio");
+
+    await page.locator("#quantManualDetails summary").click();
+    assert.ok(await page.locator("#quantManualDetails").evaluate((details) => details.open));
+    await page.locator("#quantLane").selectOption("1");
+    await page.locator("#quantRoiType").selectOption("background");
+    const cancelCanvas = page.locator("#quantCanvas");
+    const cancelBox = await cancelCanvas.boundingBox();
+    const cancelHeight = await cancelCanvas.evaluate((canvas) => canvas.height);
+    assert.ok(cancelBox, "quantification canvas must remain visible for pointer cancellation");
+    const cancelX = cancelBox.x + cancelBox.width / 2;
+    const cancelY = cancelBox.y + cancelBox.height * 57 / cancelHeight;
+    const movedY = cancelBox.y + cancelBox.height * 63 / cancelHeight;
+    const beforeCancel = await cancelCanvas.evaluate((canvas) => canvas.toDataURL());
+    await cancelCanvas.evaluate((canvas) => canvas.addEventListener("pointerdown", (event) => { canvas.__e2ePointerId = event.pointerId; }, { once: true }));
+    await page.mouse.move(cancelX, cancelY);
+    await page.mouse.down();
+    await page.mouse.move(cancelX, movedY);
+    assert.notEqual(await cancelCanvas.evaluate((canvas) => canvas.toDataURL()), beforeCancel, "pointer movement must visibly move the selected ROI before cancellation");
+    const cancelPointerId = await cancelCanvas.evaluate((canvas) => canvas.__e2ePointerId);
+    await page.dispatchEvent("#quantCanvas", "pointercancel", { pointerId: cancelPointerId, pointerType: "mouse", clientX: cancelX, clientY: movedY, buttons: 0 });
+    await page.mouse.up();
+    assert.equal(await cancelCanvas.evaluate((canvas) => canvas.toDataURL()), beforeCancel, "pointer cancellation must restore the original ROI geometry");
+    assert.equal(await page.locator("#quantResults tbody tr").count(), 3, "pointer cancellation must preserve formal results");
+    for (const selector of ["#exportQuantPlotPng", "#exportQuantCsv", "#exportQuantXlsx", "#exportPrism"]) {
+      assert.ok(await page.locator(selector).isEnabled(), `${selector} must remain enabled after a cancelled ROI drag`);
+    }
 
     const cleavageCsvDownload = page.waitForEvent("download");
     await page.locator("#exportQuantCsv").click();
@@ -470,6 +552,7 @@ async function waitForServer(url) {
     assert.equal(cleavageProject.settings.quant.rois[cleavageDenominatorKey].polarity, "bright");
     assert.equal(cleavageProject.settings.quant.rois[cleavageNumeratorKey].method, "manual-row-line-v1");
     assert.equal(cleavageProject.settings.quant.rois[cleavageDenominatorKey].method, "manual-row-line-v1");
+    assert.equal(cleavageProject.settings.quant.rois[cleavageDenominatorKey].confirmed, true, "pointer cancellation must not unconfirm the restored ROI");
     assert.equal(cleavageProject.rows[0].source.sha256, cleavageProject.rows[1].source.sha256, "N and FL must retain the same source TIFF identity");
 
     await page.locator("#openQuant").click();
@@ -480,7 +563,7 @@ async function waitForServer(url) {
     assert.ok(await page.locator("#quantNumeratorField").isHidden());
     assert.ok(await page.locator("#quantDenominatorField").isHidden());
     assert.ok(await page.locator("#createCleavagePair").isHidden());
-    assert.equal(await page.locator("#calculateQuant").textContent(), "确认当前 ROI 并计算");
+    assert.equal(await page.locator("#calculateQuant").textContent(), "生成分组归一化结果");
     await page.locator('[data-close-dialog="quantDialog"]').click();
 
     await page.setViewportSize({ width: 390, height: 844 });

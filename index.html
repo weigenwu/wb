@@ -758,7 +758,7 @@
   </dialog>
 
   <dialog id="quantDialog" class="science-dialog" aria-labelledby="quantTitle">
-    <div class="dialog-head"><div><h2 id="quantTitle">WB 灰度定量</h2><p>仅使用 8-bit 单通道原始 TIFF；先确认样本映射和 ROI，再从原始像素重算。</p></div><button class="icon-button" data-close-dialog="quantDialog" type="button" aria-label="关闭">✕</button></div>
+    <div class="dialog-head"><div><h2 id="quantTitle">WB 灰度定量</h2><p>仅使用 8-bit 单通道原始 TIFF；在条带中心直接拉横线，松开即显示每个泳道的灰度。</p></div><button class="icon-button" data-close-dialog="quantDialog" type="button" aria-label="关闭">✕</button></div>
     <div class="science-body">
       <div class="science-toolbar">
         <label>定量模式<select id="quantNormalizationMode"><option value="loading">常规：目的蛋白 / 上样内参</option><option value="paired-band">裂解：同泳道 N 段 / 全长</option></select></label>
@@ -773,22 +773,25 @@
         <label>ROI 高度（px）<input id="quantRoiHeight" type="number" min="2" step="1" inputmode="numeric" aria-label="条带与背景 ROI 高度，单位像素"></label>
         <button class="button small" id="initializeRois" type="button">按泳道等宽初始化</button>
         <button class="button small" id="suggestRois" type="button">信号建议 ROI</button>
-        <button class="button small" id="guideRois" type="button">拖横线定位整排</button>
-        <button class="button small primary" id="calculateQuant" type="button">确认当前 ROI 并计算</button>
+        <button class="button small" id="guideRois" type="button">拉线即算当前灰度</button>
+        <button class="button small primary" id="calculateQuant" type="button">生成分组归一化结果</button>
       </div>
       <div class="quant-layout">
         <div class="quant-stage"><canvas id="quantCanvas" width="900" height="500" tabindex="0" role="application" aria-label="原始 TIFF 灰度定量 ROI 编辑器"></canvas></div>
         <div class="quant-side">
-          <strong>ROI 操作</strong>
-          <p class="field-help">黄色：条带 ROI；蓝色：同尺寸局部背景。可直接点击框后拖动；方向键微调，Shift 为 10 px，［/］统一缩放。</p>
-          <p class="field-help" id="quantPolarityNote">常规模式直接显示原始 TIFF。选择“反转”时只反转定量预览，原始 TIFF 与导出审计值不会被覆盖。</p>
-          <p class="field-help" id="quantModeNote">常规定量使用目的蛋白/上样内参。GSDMB 裂解请选择 N/FL；同一内参在分子与分母中会相消，不再重复除以 GAPDH。</p>
-          <p class="field-help">信号建议只分析当前裁剪区域，并按已设置的泳道数定位；请先排除 Marker 和无关泳道。</p>
-          <p class="field-help"><strong>Fiji/JAR 对照：</strong>结果中的 IntDen 是按条带极性换算后的 ROI 像素和，未扣除背景；正式归一化仍使用局部背景校正灰度。</p>
-          <label>泳道<select id="quantLane"></select></label>
-          <label>当前框<select id="quantRoiType"><option value="band">条带 ROI</option><option value="background">背景 ROI</option></select></label>
-          <label class="toggle"><input id="quantMapLocked" type="checkbox"> 锁定已核对的样本映射</label>
-          <p id="quantStatus" class="field-help" aria-live="polite">请先初始化 ROI。</p>
+          <strong>下一步 / 即时灰度</strong>
+          <p id="quantStatus" class="field-help" aria-live="polite">直接在条带中心按住并上下拖动，松开即算。</p>
+          <div id="quantQuickResults" class="results-table" aria-live="polite"><p class="field-help" style="padding:10px">拉一条横线后，这里立即显示每个泳道的灰度。</p></div>
+          <label class="toggle"><input id="quantMapLocked" type="checkbox"> 仅分组统计：锁定已核对的样本映射</label>
+          <details id="quantManualDetails"><summary>手动微调与说明</summary><div style="display:grid;gap:9px;padding-top:9px">
+            <p class="field-help">黄色：条带 ROI；蓝色：同尺寸局部背景。可直接点击框后拖动；方向键微调，Shift 为 10 px，［/］统一缩放。</p>
+            <p class="field-help" id="quantPolarityNote">常规模式直接显示原始 TIFF。选择“反转”时只反转定量预览，原始 TIFF 与导出审计值不会被覆盖。</p>
+            <p class="field-help" id="quantModeNote">常规定量使用目的蛋白/上样内参。GSDMB 裂解请选择 N/FL；同一内参在分子与分母中会相消，不再重复除以 GAPDH。</p>
+            <p class="field-help">信号建议只分析当前裁剪区域，并按已设置的泳道数定位；请先排除 Marker 和无关泳道。</p>
+            <p class="field-help"><strong>Fiji/JAR 对照：</strong>结果中的 IntDen 是按条带极性换算后的 ROI 像素和，未扣除背景；正式归一化仍使用局部背景校正灰度。</p>
+            <label>泳道<select id="quantLane"></select></label>
+            <label>当前框<select id="quantRoiType"><option value="band">条带 ROI</option><option value="background">背景 ROI</option></select></label>
+          </div></details>
         </div>
       </div>
       <details class="sample-import" id="sampleMapImport">
@@ -920,6 +923,7 @@
       let quantView = null;
       let quantDrag = null;
       let quantGuide = null;
+      const quantQuickRows = new Set();
       let exposureCheck = { rowKey: "", items: [], report: null };
       let exposureRunToken = 0;
       const decodedTiffCache = new WeakMap();
@@ -2695,6 +2699,18 @@
         return state.quant.normalizationMode === "paired-band" ? "paired-band" : "loading";
       }
 
+      function sameQuantSource(left, right) {
+        if (!left || !right) return false;
+        const hasBothHashes = Boolean(left.sourceSha256 && right.sourceSha256);
+        if (hasBothHashes) return left.sourceSha256 === right.sourceSha256;
+        return Boolean(left.sourceFile && left.sourceFile === right.sourceFile);
+      }
+
+      function pairedLaneGeometryMatches(left, right) {
+        return Boolean(left?.lanes?.length && left.lanes.length === right?.lanes?.length
+          && left.lanes.every((lane, index) => lane.band.x === right.lanes[index].band.x && lane.band.w === right.lanes[index].band.w && lane.band.h === right.lanes[index].band.h));
+      }
+
       function syncQuantModeUi() {
         const paired = quantNormalizationMode() === "paired-band";
         $("#quantNormalizationMode").value = paired ? "paired-band" : "loading";
@@ -2702,10 +2718,10 @@
         $("#quantNumeratorField").hidden = !paired;
         $("#quantDenominatorField").hidden = !paired;
         $("#createCleavagePair").hidden = !paired;
-        $("#calculateQuant").textContent = paired ? "确认当前 ROI 并计算 N/FL" : "确认当前 ROI 并计算";
+        $("#calculateQuant").textContent = paired ? "生成分组 Fold / Prism 图" : "生成分组归一化结果";
         $("#quantModeNote").textContent = paired
-          ? "裂解模式计算同泳道、同一原始 TIFF 的背景校正 N 段/全长（N/FL）；GAPDH 可保留作上样 QC，但不会再次参与这个比值。"
-          : "常规定量计算目的蛋白/上样内参，再相对控制组归一化。";
+          ? "N 和 FL 各拉一次横线，立即得到每道背景校正灰度与 N/FL；只有分组 Fold、统计和 Prism 图才需锁定样本映射。GAPDH 不再参与 N/FL。"
+          : "拉线后立即显示当前条带灰度；生成目的蛋白/上样内参的分组结果时，再锁定样本映射。";
       }
 
       function syncQuantSelectors(selectedKey) {
@@ -2845,9 +2861,11 @@
           $("#quantMembrane").value = row.membraneId || "";
           quantView = { row, decoded };
           quantGuide = null;
+          if (entry?.method === "manual-row-line-v1") quantQuickRows.add(row.rowKey);
           paintQuantCanvas();
           const method = entry?.method === "manual-row-line-v1" ? "横线定位" : entry?.method?.startsWith("row-contrast") ? "信号建议" : entry ? "手动/等宽" : "";
-          $("#quantStatus").textContent = entry ? `${entry.confirmed ? "已确认" : "待确认"} · ${entry.lanes.length} 条泳道 ROI · ${method}` : "请先按泳道等宽初始化或生成信号建议 ROI。";
+          $("#quantStatus").textContent = entry ? `${entry.confirmed ? "已确认" : "待确认"} · ${entry.lanes.length} 条泳道 ROI · ${method}` : "直接在条带中心按住并上下拖动，松开即显示灰度。";
+          renderQuantQuickResults();
           prepareExposureCheck(row);
         } catch (error) { toast(error.message); }
       }
@@ -2878,10 +2896,12 @@
             };
           }),
         };
+        quantQuickRows.delete(row.rowKey);
         invalidateQuantResults();
         markDirty();
         invalidateExposureReport();
         paintQuantCanvas();
+        renderQuantQuickResults();
         $("#quantStatus").textContent = `已按泳道等宽初始化 ${boxHeight} px 高 ROI；请逐泳道核对条带框和局部背景框。`;
       }
 
@@ -2900,10 +2920,12 @@
             method: suggestion.method,
             lanes: suggestion.lanes.map((lane) => ({ band: lane.band, background: lane.background })),
           };
+          quantQuickRows.delete(row.rowKey);
           invalidateQuantResults();
           markDirty();
           invalidateExposureReport();
           paintQuantCanvas();
+          renderQuantQuickResults();
           const review = suggestion.warnings.map((warning) => warning.lane);
           $("#quantStatus").textContent = review.length
             ? `已生成信号建议；第 ${review.join("、")} 道需重点核对，建议不会自动确认。`
@@ -2913,17 +2935,101 @@
         }
       }
 
+      function quantQuickMeasurements(entry, decoded) {
+        return entry.lanes.map((lane) => window.WBCore.quantifyRoiPair({
+          pixels: decoded.pixels,
+          width: decoded.width,
+          height: decoded.height,
+          band: lane.band,
+          background: lane.background,
+          polarity: entry.polarity,
+        }));
+      }
+
+      function renderQuantQuickResults() {
+        const container = $("#quantQuickResults");
+        if (!container || !quantView) return;
+        try {
+        const qcLabels = {
+          POLARITY_OR_SIGNAL_INVALID: "极性/信号无效",
+          SIGNAL_SATURATION_HIGH: "条带饱和≥1%",
+          BACKGROUND_CLIPPING_HIGH: "背景裁切≥1%",
+          SIGNAL_ENDPOINT_PRESENT: "条带有端点像素",
+          BACKGROUND_ENDPOINT_PRESENT: "背景有端点像素",
+        };
+        const qcText = (items) => [...new Set(items.flatMap((item) => item?.qc || []))].map((code) => qcLabels[code] || code).join("; ") || "—";
+        const number = (value, digits = 1) => Number.isFinite(value) ? Number(value).toFixed(digits) : "NA";
+        const quickReady = (row, entry) => Boolean(row && entry && (quantQuickRows.has(row.rowKey) || entry.method === "manual-row-line-v1"));
+        const ratioBlocked = (measurement) => !Number.isFinite(measurement?.corrected) || measurement.corrected <= 0
+          || measurement.qc?.some((code) => code === "SIGNAL_SATURATION_HIGH" || code === "BACKGROUND_CLIPPING_HIGH");
+        const singleTable = (row, entry, decoded, note = "") => {
+          const measurements = quantQuickMeasurements(entry, decoded);
+          const invalid = measurements.some((measurement) => measurement.corrected <= 0);
+          container.innerHTML = `<p class="field-help" style="padding:8px"><strong>${xml(row.name)} 即时灰度</strong>${note ? `<br>${xml(note)}` : ""}${invalid ? "<br>⚠ 有校正灰度≤0：请切换常规/反转，或移动蓝色背景框。" : ""}</p><table><thead><tr><th>泳道</th><th>背景校正灰度</th><th>Fiji IntDen</th><th>QC</th></tr></thead><tbody>${measurements.map((measurement, index) => `<tr><td>${index + 1}</td><td>${number(measurement.corrected)}</td><td>${number(measurement.fijiIntDen)}</td><td>${xml(qcText([measurement]))}</td></tr>`).join("")}</tbody></table>`;
+        };
+        const currentEntry = state.quant.rois[quantView.row.rowKey];
+        if (quantNormalizationMode() !== "paired-band") {
+          if (!quickReady(quantView.row, currentEntry)) {
+            container.innerHTML = '<p class="field-help" style="padding:10px">拉一条横线后，这里立即显示每个泳道的灰度。</p>';
+            return;
+          }
+          singleTable(quantView.row, currentEntry, quantView.decoded);
+          return;
+        }
+
+        const numeratorRow = state.rows.find((row) => row.rowKey === state.quant.numeratorKey);
+        const denominatorRow = state.rows.find((row) => row.rowKey === state.quant.denominatorKey);
+        const numeratorEntry = numeratorRow && state.quant.rois[numeratorRow.rowKey];
+        const denominatorEntry = denominatorRow && state.quant.rois[denominatorRow.rowKey];
+        const currentIsPair = quantView.row.rowKey === numeratorRow?.rowKey || quantView.row.rowKey === denominatorRow?.rowKey;
+        if (currentIsPair && quickReady(numeratorRow, numeratorEntry) && quickReady(denominatorRow, denominatorEntry)) {
+          if (!sameQuantSource(numeratorRow, denominatorRow)) {
+            container.innerHTML = '<p class="field-help" style="padding:10px">⚠ N 与 FL 不是同一原始 TIFF，不计算 N/FL。</p>';
+            return;
+          }
+          if (numeratorEntry.polarity !== denominatorEntry.polarity) {
+            container.innerHTML = '<p class="field-help" style="padding:10px">⚠ N 与 FL 的常规/反转设置不一致。</p>';
+            return;
+          }
+          if (!pairedLaneGeometryMatches(numeratorEntry, denominatorEntry)) {
+            container.innerHTML = '<p class="field-help" style="padding:10px">⚠ N 与 FL 的泳道横向位置不一致，请重新拉线。</p>';
+            return;
+          }
+          const numerator = quantQuickMeasurements(numeratorEntry, quantView.decoded);
+          const denominator = quantQuickMeasurements(denominatorEntry, quantView.decoded);
+          const invalid = numerator.some((measurement, index) => ratioBlocked(measurement) || ratioBlocked(denominator[index]));
+          container.innerHTML = `<p class="field-help" style="padding:8px"><strong>即时 N/FL 预览（无需锁定样本映射）</strong>${invalid ? "<br>⚠ 有泳道的校正灰度无效或端点像素≥1%，该道 N/FL 显示 NA。" : ""}<br>未检出端点像素不等于已验证线性范围。分组 Fold、统计和 Prism 图才需要锁定样本映射。</p><table><thead><tr><th>泳道</th><th>N 校正</th><th>FL 校正</th><th>N/FL</th><th>QC</th></tr></thead><tbody>${numerator.map((fragment, index) => {
+            const fullLength = denominator[index];
+            const ratio = ratioBlocked(fragment) || ratioBlocked(fullLength) ? null : fragment.corrected / fullLength.corrected;
+            return `<tr><td>${index + 1}</td><td>${number(fragment.corrected)}</td><td>${number(fullLength?.corrected)}</td><td>${number(ratio, 4)}</td><td>${xml(qcText([fragment, fullLength]))}</td></tr>`;
+          }).join("")}</tbody></table>`;
+          return;
+        }
+
+        const ready = [
+          { row: numeratorRow, entry: numeratorEntry, other: denominatorRow },
+          { row: denominatorRow, entry: denominatorEntry, other: numeratorRow },
+        ].find((item) => quickReady(item.row, item.entry) && sameQuantSource(item.row, quantView.row));
+        if (ready) {
+          singleTable(ready.row, ready.entry, quantView.decoded, `现在再为 ${ready.other?.name || "另一条带"} 拉一条横线，即可得到 N/FL。`);
+          return;
+        }
+        if (quickReady(quantView.row, currentEntry)) singleTable(quantView.row, currentEntry, quantView.decoded);
+        else container.innerHTML = '<p class="field-help" style="padding:10px">请在 N 或 FL 条带中心拉第一条横线。</p>';
+        } catch (error) {
+          container.innerHTML = '<p class="field-help" style="padding:10px">⚠ ROI 无效或与背景重叠，未计算。请重新拉线或移动黄色/蓝色框。</p>';
+        }
+      }
+
       function startQuantGuide() {
         if (!quantView) return toast("请先选择要定位的 TIFF 条带行");
-        const entry = state.quant.rois[quantView.row.rowKey];
-        if (entry?.confirmed && !confirm("横线定位会覆盖当前已确认的 ROI，继续吗？")) return;
         quantGuide = { active: true, pointerId: null, y: null };
         $("#quantCanvas").focus();
         $("#quantStatus").textContent = "请在条带中心按住鼠标并上下拖动；松开后会把整排黄色 ROI 对齐，并自动选择局部背景。";
         paintQuantCanvas();
       }
 
-      function applyQuantGuide(y) {
+      async function applyQuantGuide(y) {
         const row = quantView?.row;
         const decoded = quantView?.decoded;
         if (!row || !decoded) return;
@@ -2938,13 +3044,31 @@
             method: placed.method,
             lanes: placed.lanes.map((lane) => ({ band: lane.band, background: lane.background })),
           };
+          quantQuickRows.add(row.rowKey);
           $("#quantRoiHeight").value = String(roiHeight);
           invalidateQuantResults();
           invalidateExposureReport();
           markDirty();
-          $("#quantStatus").textContent = `已按横线定位 ${totalSamples()} 条泳道；请检查黄色条带框和蓝色局部背景框，再确认计算。`;
+          $("#quantStatus").textContent = `已计算 ${row.name} 的 ${totalSamples()} 条泳道即时灰度。`;
+          paintQuantCanvas();
+          renderQuantQuickResults();
+          if (quantNormalizationMode() === "paired-band") {
+            const otherKey = row.rowKey === state.quant.numeratorKey ? state.quant.denominatorKey : row.rowKey === state.quant.denominatorKey ? state.quant.numeratorKey : "";
+            const otherRow = state.rows.find((item) => item.rowKey === otherKey);
+            const otherEntry = otherKey && state.quant.rois[otherKey];
+            const otherReady = otherRow && otherEntry && (quantQuickRows.has(otherKey) || otherEntry.method === "manual-row-line-v1");
+            if (otherRow && !otherReady) {
+              $("#quantRow").value = otherKey;
+              await loadQuantRow();
+              $("#quantRoiHeight").value = String(roiHeight);
+              startQuantGuide();
+              $("#quantStatus").textContent = `${row.name} 灰度已显示；现在直接在 ${otherRow.name} 条带中心再拉一次。`;
+              return;
+            }
+          }
         } catch (error) { toast(`横线定位失败：${error.message}`); }
         paintQuantCanvas();
+        renderQuantQuickResults();
       }
 
       function markQuantRoiAdjusted(entry) {
@@ -3032,6 +3156,7 @@
         clampQuantRoi(roi);
         markQuantRoiAdjusted(state.quant.rois[quantView.row.rowKey]);
         paintQuantCanvas();
+        renderQuantQuickResults();
       }
 
       function resizeQuantRois(delta) {
@@ -3053,6 +3178,7 @@
         markQuantRoiAdjusted(entry);
         markDirty();
         paintQuantCanvas();
+        renderQuantQuickResults();
       }
 
       function exposureFileKey(file) {
@@ -3253,7 +3379,7 @@
         state.quant.normalizationMode = quantNormalizationMode();
         if (state.quant.normalizationMode === "loading") state.quant.loadingKey = $("#quantLoading").value;
         state.quant.controlGroup = $("#quantControlGroup").value;
-        if (!state.quant.locked) return toast("请先核对样本映射，并勾选“已核对泳道顺序、样本和重复”");
+        if (!state.quant.locked) return toast("即时灰度已显示；如需分组 Fold / Prism 图，请先锁定已核对的样本映射");
         const mappingIssue = sampleMapIssue();
         if (mappingIssue) return toast(mappingIssue);
         const paired = state.quant.normalizationMode === "paired-band";
@@ -3264,10 +3390,12 @@
         if (paired && (!numeratorRow || !denominatorRow)) return toast("请分别选择 GSDMB-N 与 GSDMB-FL 条带行");
         if (paired && numeratorRow.rowKey === denominatorRow.rowKey) return toast("N 段与全长必须是两套独立 ROI；可点击“用当前 TIFF 建立 N/FL”");
         if (paired) {
-          const hasBothHashes = Boolean(numeratorRow.sourceSha256 && denominatorRow.sourceSha256);
-          const sameHash = hasBothHashes && numeratorRow.sourceSha256 === denominatorRow.sourceSha256;
-          const sameFileMetadata = numeratorRow.sourceName === denominatorRow.sourceName && numeratorRow.sourceBytes === denominatorRow.sourceBytes && numeratorRow.sourceLastModified === denominatorRow.sourceLastModified;
-          if (hasBothHashes ? !sameHash : !sameFileMetadata) return toast("N/FL 只允许来自同一原始 TIFF、同一曝光的两条带；请使用“用当前 TIFF 建立 N/FL”");
+          if (!sameQuantSource(numeratorRow, denominatorRow)) return toast("N/FL 只允许来自同一原始 TIFF、同一曝光的两条带；请使用“用当前 TIFF 建立 N/FL”");
+          const pairEntries = [state.quant.rois[numeratorRow.rowKey], state.quant.rois[denominatorRow.rowKey]];
+          if (pairEntries.every(Boolean) && !pairedLaneGeometryMatches(pairEntries[0], pairEntries[1])) return toast("N 与 FL 的泳道横向位置不一致，请分别重拉横线");
+          if (pairEntries.every((entry, index) => entry && (quantQuickRows.has(index ? denominatorRow.rowKey : numeratorRow.rowKey) || entry.method === "manual-row-line-v1"))) {
+            pairEntries.forEach((entry) => { entry.confirmed = true; });
+          }
         }
         const required = paired ? [numeratorRow, denominatorRow] : [...targetRows, loadingRow].filter(Boolean);
         const missing = required.filter((row) => !state.quant.rois[row.rowKey]?.confirmed);
@@ -3338,6 +3466,7 @@
       function renderQuantResults() {
         const results = state.quant.results;
         const container = $("#quantResults");
+        ["#exportQuantCsv", "#exportQuantXlsx", "#exportPrism"].forEach((selector) => { $(selector).disabled = !results; });
         if (!results) {
           container.innerHTML = '<p class="field-help" style="padding:12px">尚未计算。</p>';
           syncQuantPlotTarget();
@@ -5246,8 +5375,8 @@
         keys.filter(Boolean).forEach((key) => {
           const entry = state.quant.rois[key];
           if (entry && entry.polarity !== nextPolarity) {
-            entry.polarity = nextPolarity;
-            entry.confirmed = false;
+            delete state.quant.rois[key];
+            quantQuickRows.delete(key);
             changed = true;
           }
         });
@@ -5255,8 +5384,10 @@
           invalidateQuantResults();
           invalidateExposureReport();
           markDirty();
+          $("#quantStatus").textContent = "定量显示已改变；局部背景需重新选择，请重新拉线。";
         }
         paintQuantCanvas();
+        renderQuantQuickResults();
       });
       $("#quantMembrane").addEventListener("input", (event) => {
         if (!quantView) return;
@@ -5314,7 +5445,14 @@
           return;
         }
         const hit = hitQuantRoi(x, y);
-        if (!hit) return;
+        if (!hit || !$("#quantManualDetails").open) {
+          startQuantGuide();
+          quantGuide.pointerId = event.pointerId;
+          quantGuide.y = Math.max(0, Math.min(quantView.decoded.height, y));
+          event.currentTarget.setPointerCapture(event.pointerId);
+          paintQuantCanvas();
+          return;
+        }
         $("#quantLane").value = String(hit.laneIndex);
         $("#quantRoiType").value = hit.type;
         const roi = hit.roi;
@@ -5338,7 +5476,6 @@
         roi.x = x - quantDrag.dx;
         roi.y = y - quantDrag.dy;
         clampQuantRoi(roi);
-        markQuantRoiAdjusted(state.quant.rois[quantView.row.rowKey]);
         paintQuantCanvas();
       });
       const finishQuantDrag = (event) => {
@@ -5349,16 +5486,25 @@
           return;
         }
         if (!quantDrag || quantDrag.pointerId !== event.pointerId) return;
+        markQuantRoiAdjusted(state.quant.rois[quantView.row.rowKey]);
         quantDrag = null;
         markDirty();
+        renderQuantQuickResults();
       };
       $("#quantCanvas").addEventListener("pointerup", finishQuantDrag);
       $("#quantCanvas").addEventListener("pointercancel", (event) => {
         if (quantGuide?.pointerId === event.pointerId) { quantGuide = null; paintQuantCanvas(); }
-        if (quantDrag?.pointerId === event.pointerId) quantDrag = null;
+        if (quantDrag?.pointerId === event.pointerId) {
+          const roi = selectedQuantRoi();
+          if (roi) Object.assign(roi, quantDrag.start);
+          quantDrag = null;
+          paintQuantCanvas();
+          renderQuantQuickResults();
+        }
       });
       $("#quantCanvas").addEventListener("keydown", (event) => {
         if (event.key === "Escape" && quantGuide) { event.preventDefault(); quantGuide = null; paintQuantCanvas(); return; }
+        if (!$("#quantManualDetails").open) return;
         const step = event.shiftKey ? 10 : 1;
         if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "[", "]"].includes(event.key)) event.preventDefault();
         if (event.key === "ArrowLeft") moveQuantRoi(-step, 0);
