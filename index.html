@@ -2983,7 +2983,7 @@
           ctx.stroke();
           ctx.setLineDash([]);
         }
-        if (!entry) return;
+        if (quantGuide?.active || !entry) return;
         const selectedLane = Number($("#quantLane").value || 0);
         const selectedType = $("#quantRoiType").value;
         entry.lanes.forEach((lane, laneIndex) => ["background", "band"].forEach((type) => {
