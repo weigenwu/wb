@@ -5,7 +5,7 @@
 })(typeof globalThis === "undefined" ? this : globalThis, function () {
   "use strict";
 
-  const ENGINE_VERSION = "2.4.0";
+  const ENGINE_VERSION = "2.5.0";
   const encoder = new TextEncoder();
 
   function bytes(value) {
@@ -389,7 +389,7 @@
     return output;
   }
 
-  function suggestLaneRois(input) {
+  function laneRoiLayout(input, requestedHeight) {
     const pixels = bytes(input.pixels);
     const width = Number(input.width);
     const height = Number(input.height);
@@ -409,7 +409,10 @@
     const polarity = input.polarity === "bright" ? "bright" : "dark";
     const laneWidth = crop.w / laneCount;
     const boxWidth = Math.max(2, Math.min(Math.floor(laneWidth), Math.round(laneWidth * .72)));
-    const boxHeight = Math.max(2, Math.min(crop.h - 4, Math.round(crop.h * .22)));
+    const boxHeight = requestedHeight === undefined
+      ? Math.max(2, Math.min(crop.h - 4, Math.round(crop.h * .22)))
+      : Math.round(Number(requestedHeight));
+    if (!Number.isFinite(boxHeight) || boxHeight < 2 || boxHeight > crop.h - 4) throw new Error("ROI height is outside the crop");
     const profiles = Array.from({ length: laneCount }, (_, laneIndex) => {
       const x = Math.max(crop.x, Math.min(crop.x + crop.w - boxWidth, Math.round(crop.x + laneIndex * laneWidth + (laneWidth - boxWidth) / 2)));
       const rows = Array.from({ length: crop.h }, (_, offsetY) => {
@@ -419,6 +422,27 @@
       });
       return { x, rows, windows: windowAverages(rows, boxHeight) };
     });
+    return { pixels, width, height, laneCount, crop, polarity, boxWidth, boxHeight, profiles };
+  }
+
+  function cleanLocalBackgroundStart(profile, bandStart, boxHeight, polarity, laneIndex) {
+    const gap = 2;
+    const candidateStarts = [];
+    const minimum = Math.max(0, bandStart - boxHeight * 2 - gap);
+    const maximum = Math.min(profile.windows.length - 1, bandStart + boxHeight * 2 + gap);
+    for (let index = minimum; index <= maximum; index += 1) {
+      if (index + boxHeight + gap <= bandStart || index >= bandStart + boxHeight + gap) candidateStarts.push(index);
+    }
+    if (!candidateStarts.length) throw new Error(`Lane ${laneIndex + 1} has no non-overlapping local background region`);
+    return candidateStarts.reduce((best, index) => {
+      const signal = polarity === "dark" ? 255 - profile.windows[index] : profile.windows[index];
+      const bestValue = polarity === "dark" ? 255 - profile.windows[best] : profile.windows[best];
+      return signal < bestValue ? index : best;
+    }, candidateStarts[0]);
+  }
+
+  function suggestLaneRois(input) {
+    const { pixels, width, height, laneCount, crop, polarity, boxWidth, boxHeight, profiles } = laneRoiLayout(input);
     const common = profiles[0].windows.map((_, index) => profiles.reduce((sum, profile) => sum + (polarity === "dark" ? 255 - profile.windows[index] : profile.windows[index]), 0) / laneCount);
     let commonStart = 0;
     for (let index = 1; index < common.length; index += 1) {
@@ -435,19 +459,7 @@
         if (signal > bestSignal) { bestSignal = signal; start = index; }
       }
       const band = { x: profile.x, y: crop.y + start, w: boxWidth, h: boxHeight };
-      const gap = 2;
-      const candidateStarts = [];
-      const minimum = Math.max(0, start - boxHeight * 2 - gap);
-      const maximum = Math.min(profile.windows.length - 1, start + boxHeight * 2 + gap);
-      for (let index = minimum; index <= maximum; index += 1) {
-        if (index + boxHeight + gap <= start || index >= start + boxHeight + gap) candidateStarts.push(index);
-      }
-      if (!candidateStarts.length) throw new Error(`Lane ${laneIndex + 1} has no non-overlapping local background region`);
-      const backgroundStart = candidateStarts.reduce((best, index) => {
-        const signal = polarity === "dark" ? 255 - profile.windows[index] : profile.windows[index];
-        const bestValue = polarity === "dark" ? 255 - profile.windows[best] : profile.windows[best];
-        return signal < bestValue ? index : best;
-      }, candidateStarts[0]);
+      const backgroundStart = cleanLocalBackgroundStart(profile, start, boxHeight, polarity, laneIndex);
       const background = { x: profile.x, y: crop.y + backgroundStart, w: boxWidth, h: boxHeight };
       const measurement = quantifyRoiPair({ pixels, width, height, band, background, polarity });
       const contrastZ = polarity === "dark"
@@ -463,6 +475,24 @@
     const status = lanes.some((lane) => lane.qc.includes("ROI_SIGNAL_LOW_CONFIDENCE")) ? "low"
       : lanes.some((lane) => lane.qc.length) ? "review" : "clear";
     return { lanes, status, warnings, method: "row-contrast-v1" };
+  }
+
+  function laneRoisAtBandCenter(input) {
+    const { crop, polarity, boxWidth, boxHeight, profiles } = laneRoiLayout(input, input.roiHeight);
+    const bandCenterY = Number(input.bandCenterY);
+    if (!Number.isFinite(bandCenterY)) throw new Error("Band center Y must be finite");
+    const bandY = Math.round(bandCenterY - boxHeight / 2);
+    if (bandY < crop.y || bandY + boxHeight > crop.y + crop.h) throw new Error("Band ROI must stay inside the crop");
+    const bandStart = bandY - crop.y;
+    const lanes = profiles.map((profile, laneIndex) => {
+      const band = { x: profile.x, y: bandY, w: boxWidth, h: boxHeight };
+      const backgroundStart = cleanLocalBackgroundStart(profile, bandStart, boxHeight, polarity, laneIndex);
+      return {
+        band,
+        background: { x: profile.x, y: crop.y + backgroundStart, w: boxWidth, h: boxHeight },
+      };
+    });
+    return { lanes, method: "manual-row-line-v1" };
   }
 
   function assessExposureSeries(input) {
@@ -636,6 +666,39 @@
       if (row.controlMean === null) row.qc.push("CONTROL_BASELINE_MISSING");
     });
     return rows;
+  }
+
+  function normalizeCleavageMeasurements(numerator, denominator, samples, controlGroup) {
+    if (!Array.isArray(numerator?.lanes) || !Array.isArray(denominator?.lanes) || !Array.isArray(samples)) {
+      throw new Error("Cleavage quantification mapping is incomplete");
+    }
+    if (!numerator.lanes.length || numerator.lanes.length !== denominator.lanes.length) {
+      throw new Error("Fragment and full-length measurements must have the same number of lanes");
+    }
+    if (samples.length !== numerator.lanes.length) throw new Error("Sample map must contain one row per lane");
+    numerator.lanes.forEach((measurement, index) => {
+      if (samples[index]?.excluded) return;
+      const denominatorMeasurement = denominator.lanes[index];
+      if (!Number.isFinite(measurement?.corrected) || measurement.corrected <= 0
+        || !Number.isFinite(denominatorMeasurement?.corrected) || denominatorMeasurement.corrected <= 0) {
+        throw new Error("Every fragment and full-length lane requires a positive background-corrected intensity");
+      }
+    });
+
+    return normalizeMeasurements(
+      [{ key: numerator.key || "fragment", name: numerator.name || "Fragment", lanes: numerator.lanes }],
+      { key: denominator.key || "full-length", name: denominator.name || "Full length", lanes: denominator.lanes },
+      samples,
+      controlGroup,
+    ).map((row) => ({
+      ...row,
+      ratioFormula: "N/FL",
+      fragmentMeasurement: row.targetMeasurement,
+      fullLengthMeasurement: row.loadingMeasurement,
+      fragmentFullLengthRatio: row.ratio,
+      biologicalFragmentFullLengthRatio: row.biologicalRatio,
+      controlMeanFragmentFullLengthRatio: row.controlMean,
+    }));
   }
 
   function prismColumnTables(normalizedRows) {
@@ -1126,9 +1189,11 @@
     xlsxWorkbook,
     parseSampleMapTable,
     suggestLaneRois,
+    laneRoisAtBandCenter,
     assessExposureSeries,
     quantifyRoiPair,
     normalizeMeasurements,
+    normalizeCleavageMeasurements,
     prismColumnTables,
     summarizeNormalized,
     ordinaryAnovaDunnett,
