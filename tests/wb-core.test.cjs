@@ -159,6 +159,29 @@ function testRoiSuggestions() {
   assert.equal(core.suggestLaneRois({ pixels: new Uint8Array(3 * 200000).fill(200), width: 3, height: 200000, laneCount: 1 }).lanes.length, 1);
 }
 
+function testManualRowLineRois() {
+  const width = 30;
+  const height = 40;
+  const pixels = Uint8Array.from({ length: width * height }, (_, index) => Math.floor(index / width) * 5);
+  const input = { pixels, width, height, crop: { x: 3, y: 4, w: 24, h: 32 }, laneCount: 2, bandCenterY: 20, roiHeight: 4 };
+  const dark = core.laneRoisAtBandCenter({ ...input, polarity: "dark" });
+  const bright = core.laneRoisAtBandCenter({ ...input, polarity: "bright" });
+  assert.equal(dark.method, "manual-row-line-v1");
+  assert.equal(dark.lanes.length, 2);
+  assert.equal(dark.lanes[0].band.y, 18);
+  assert.equal(dark.lanes[0].band.h, 4);
+  assert.equal(dark.lanes[0].background.y, 28, "dark polarity chooses the brightest clean local background");
+  assert.equal(bright.lanes[0].background.y, 8, "bright polarity chooses the darkest clean local background");
+  [dark, bright].flatMap(({ lanes }) => lanes).forEach((lane) => {
+    assert.equal(lane.band.y, 18, "the user line fixes one shared band row across lanes");
+    assert.ok(lane.background.y + lane.background.h <= lane.band.y || lane.band.y + lane.band.h <= lane.background.y);
+    assert.ok(lane.band.x >= 3 && lane.band.x + lane.band.w <= 27);
+    assert.ok(lane.background.y >= 4 && lane.background.y + lane.background.h <= 36);
+  });
+  assert.throws(() => core.laneRoisAtBandCenter({ ...input, bandCenterY: 5 }), /inside the crop/);
+  assert.throws(() => core.laneRoisAtBandCenter({ ...input, bandCenterY: 35 }), /inside the crop/);
+}
+
 function testExposureSeries() {
   const linear = core.assessExposureSeries([
     { time: 1, lanes: [{ corrected: 100, signalClippedFraction: 0 }] },
@@ -249,6 +272,27 @@ function testDarkAndBrightRois() {
   }), /must not overlap/);
 }
 
+function testBrightPolarityEqualsInvertedDark() {
+  const pixels = Uint8Array.of(230, 240, 20, 20, 230, 240, 20, 20);
+  const input = {
+    width: 4,
+    height: 2,
+    band: { x: 0, y: 0, w: 2, h: 2 },
+    background: { x: 2, y: 0, w: 2, h: 2 },
+  };
+  const bright = core.quantifyRoiPair({ ...input, pixels, polarity: "bright" });
+  const invertedDark = core.quantifyRoiPair({
+    ...input,
+    pixels: Uint8Array.from(pixels, (value) => 255 - value),
+    polarity: "dark",
+  });
+  assert.equal(bright.fijiIntDen, invertedDark.fijiIntDen);
+  assert.equal(bright.corrected, invertedDark.corrected);
+  assert.equal(bright.bandMean, 255 - invertedDark.bandMean);
+  assert.equal(bright.backgroundMean, 255 - invertedDark.backgroundMean);
+  assert.deepEqual(bright.qc, invertedDark.qc);
+}
+
 function testDisplayBackgroundFlattening() {
   const width = 60;
   const height = 18;
@@ -327,6 +371,70 @@ function testNormalizationAndPrism() {
     { targetKey: "her2", target: "HER2", group: "Control", n: 2, mean: 1, sd: 0 },
     { targetKey: "her2", target: "HER2", group: "Drug", n: 1, mean: 4, sd: null },
   ]);
+}
+
+function testCleavageNormalization() {
+  const fragment = {
+    key: "gsdmb-n",
+    name: "GSDMB-N",
+    lanes: [
+      { bandSum: 150, backgroundSum: 50, backgroundMean: 5, fijiIntDen: 2050, corrected: 100, qc: [] },
+      { bandSum: 350, backgroundSum: 50, backgroundMean: 5, fijiIntDen: 2250, corrected: 300, qc: [] },
+      { bandSum: 250, backgroundSum: 50, backgroundMean: 5, fijiIntDen: 2150, corrected: 200, qc: [] },
+      { bandSum: 50, backgroundSum: 50, backgroundMean: 5, fijiIntDen: 2050, corrected: 0, qc: ["POLARITY_OR_SIGNAL_INVALID"] },
+      { bandSum: 850, backgroundSum: 50, backgroundMean: 5, fijiIntDen: 2750, corrected: 800, qc: [] },
+    ],
+  };
+  const fullLength = {
+    key: "gsdmb-fl",
+    name: "GSDMB-FL",
+    lanes: [100, 100, 100, 0, 200].map((corrected) => ({
+      bandSum: corrected + 40,
+      backgroundSum: 40,
+      backgroundMean: 4,
+      fijiIntDen: corrected + 2000,
+      corrected,
+      qc: [],
+    })),
+  };
+  const samples = [
+    { sampleId: "C1a", group: "Control", biologicalReplicate: 1, technicalReplicate: 1 },
+    { sampleId: "C1b", group: "Control", biologicalReplicate: 1, technicalReplicate: 2 },
+    { sampleId: "C2", group: "Control", biologicalReplicate: 2 },
+    { sampleId: "C-excluded", group: "Control", biologicalReplicate: 3, excluded: true },
+    { sampleId: "D1", group: "Drug", biologicalReplicate: 1 },
+  ];
+  const rows = core.normalizeCleavageMeasurements(fragment, fullLength, samples, "Control");
+
+  assert.equal(rows[0].ratioFormula, "N/FL");
+  assert.equal(rows[0].fragmentFullLengthRatio, 1, "ratio is N/FL, not N/(N+FL)");
+  assert.equal(rows[0].biologicalFragmentFullLengthRatio, 2, "technical N/FL replicates are averaged first");
+  assert.equal(rows[0].controlMeanFragmentFullLengthRatio, 2, "control baseline uses biological replicates");
+  assert.equal(rows[4].fragmentFullLengthRatio, 4);
+  assert.equal(rows[4].foldChange, 2);
+  assert.equal(rows[3].fragmentFullLengthRatio, null, "an excluded invalid lane remains reportable without being normalized");
+  assert.equal(rows[3].biologicalFragmentFullLengthRatio, null, "excluded lanes do not contribute a biological value");
+  assert.equal(rows[3].foldChange, null);
+  assert.ok(rows[3].qc.includes("NORMALIZATION_INVALID"));
+  assert.strictEqual(rows[0].fragmentMeasurement, fragment.lanes[0], "raw, background, corrected and Fiji fields are preserved");
+  assert.strictEqual(rows[0].fullLengthMeasurement, fullLength.lanes[0]);
+  assert.deepEqual(
+    [rows[0].fragmentMeasurement.bandSum, rows[0].fragmentMeasurement.backgroundSum, rows[0].fragmentMeasurement.corrected, rows[0].fragmentMeasurement.fijiIntDen],
+    [150, 50, 100, 2050],
+  );
+
+  assert.throws(
+    () => core.normalizeCleavageMeasurements({ ...fragment, lanes: [{ corrected: 0 }] }, { ...fullLength, lanes: [{ corrected: 1 }] }, [samples[0]], "Control"),
+    /positive background-corrected intensity/,
+  );
+  assert.throws(
+    () => core.normalizeCleavageMeasurements({ ...fragment, lanes: [{ corrected: 1 }] }, { ...fullLength, lanes: [{ corrected: NaN }] }, [samples[0]], "Control"),
+    /positive background-corrected intensity/,
+  );
+  assert.throws(
+    () => core.normalizeCleavageMeasurements({ ...fragment, lanes: fragment.lanes.slice(0, 1) }, fullLength, samples, "Control"),
+    /same number of lanes/,
+  );
 }
 
 function testOrdinaryAnovaDunnett() {
@@ -433,7 +541,7 @@ function testQc() {
 
 function testPwaShell() {
   const root = path.join(__dirname, "..");
-  assert.equal(core.ENGINE_VERSION, "2.4.0");
+  assert.equal(core.ENGINE_VERSION, "2.5.0");
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.webmanifest"), "utf8"));
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   assert.equal(manifest.name, "实验室工作台 · WB 组图与灰度");
@@ -444,8 +552,10 @@ function testPwaShell() {
   assert.match(html, /navigator\.serviceWorker\.register\("\.\/sw\.js"\)/);
   const worker = fs.readFileSync(path.join(root, "sw.js"), "utf8");
   assert.ok(worker.includes("./wb-core.js"));
-  assert.ok(worker.includes("figurelab-wb-v2.4.0"));
-  ["sampleMapText", "quantRoiHeight", "suggestRois", "exposureCheck", "downloadExposureReport", "quantPlotTarget", "exportQuantPlotPng", "editBackgroundClean", "editRotation", "autoStraighten"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
+  assert.ok(worker.includes("figurelab-wb-v2.5.0"));
+  ["sampleMapText", "quantRoiHeight", "suggestRois", "exposureCheck", "downloadExposureReport", "quantPlotTarget", "exportQuantPlotPng", "editBackgroundClean", "editRotation", "autoStraighten", "quantNormalizationMode", "quantNumerator", "quantDenominator", "createCleavagePair", "guideRois"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
+  assert.match(html, /window\.WBCore\.normalizeCleavageMeasurements\(/);
+  assert.match(html, /window\.WBCore\.laneRoisAtBandCenter\(/);
   assert.match(html, /ordinaryAnovaDunnett\(groups, state\.quant\.controlGroup\)/);
   assert.match(html, /✱✱✱/);
   assert.match(html, /Segoe UI Symbol/);
@@ -472,11 +582,14 @@ function testUnifiedSuiteShell() {
   testXlsx,
   testSampleMapImport,
   testRoiSuggestions,
+  testManualRowLineRois,
   testExposureSeries,
   testDarkAndBrightRois,
+  testBrightPolarityEqualsInvertedDark,
   testDisplayBackgroundFlattening,
   testAutomaticStripRotation,
   testNormalizationAndPrism,
+  testCleavageNormalization,
   testOrdinaryAnovaDunnett,
   testPrismPlotGeometry,
   testQc,

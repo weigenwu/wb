@@ -30,6 +30,7 @@
     }
 
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     html { scroll-behavior: smooth; }
     body {
       margin: 0;
@@ -760,21 +761,28 @@
     <div class="dialog-head"><div><h2 id="quantTitle">WB 灰度定量</h2><p>仅使用 8-bit 单通道原始 TIFF；先确认样本映射和 ROI，再从原始像素重算。</p></div><button class="icon-button" data-close-dialog="quantDialog" type="button" aria-label="关闭">✕</button></div>
     <div class="science-body">
       <div class="science-toolbar">
+        <label>定量模式<select id="quantNormalizationMode"><option value="loading">常规：目的蛋白 / 上样内参</option><option value="paired-band">裂解：同泳道 N 段 / 全长</option></select></label>
         <label>ROI 条带行<select id="quantRow"></select></label>
-        <label>定量内参<select id="quantLoading"></select></label>
+        <label id="quantLoadingField">定量内参<select id="quantLoading"></select></label>
+        <label id="quantNumeratorField" hidden>N 段（分子）<select id="quantNumerator"></select></label>
+        <label id="quantDenominatorField" hidden>全长（分母）<select id="quantDenominator"></select></label>
+        <button class="button small" id="createCleavagePair" type="button" hidden>用当前 TIFF 建立 N/FL</button>
         <label>控制组<select id="quantControlGroup"></select></label>
-        <label>条带极性<select id="quantPolarity"><option value="dark">暗带 / 亮背景</option><option value="bright">亮带 / 暗背景</option></select></label>
+        <label>定量显示<select id="quantPolarity"><option value="dark">常规：原图暗带 / 亮背景</option><option value="bright">反转：原图亮带 / 暗背景</option></select></label>
         <label>膜编号<input id="quantMembrane" type="text" maxlength="40" placeholder="例如 membrane-1"></label>
         <label>ROI 高度（px）<input id="quantRoiHeight" type="number" min="2" step="1" inputmode="numeric" aria-label="条带与背景 ROI 高度，单位像素"></label>
         <button class="button small" id="initializeRois" type="button">按泳道等宽初始化</button>
         <button class="button small" id="suggestRois" type="button">信号建议 ROI</button>
+        <button class="button small" id="guideRois" type="button">拖横线定位整排</button>
         <button class="button small primary" id="calculateQuant" type="button">确认当前 ROI 并计算</button>
       </div>
       <div class="quant-layout">
         <div class="quant-stage"><canvas id="quantCanvas" width="900" height="500" tabindex="0" role="application" aria-label="原始 TIFF 灰度定量 ROI 编辑器"></canvas></div>
         <div class="quant-side">
           <strong>ROI 操作</strong>
-          <p class="field-help">黄色：条带 ROI；蓝色：同尺寸局部背景。点击 ROI 后拖动；方向键微调，Shift 为 10 px。</p>
+          <p class="field-help">黄色：条带 ROI；蓝色：同尺寸局部背景。可直接点击框后拖动；方向键微调，Shift 为 10 px，［/］统一缩放。</p>
+          <p class="field-help" id="quantPolarityNote">常规模式直接显示原始 TIFF。选择“反转”时只反转定量预览，原始 TIFF 与导出审计值不会被覆盖。</p>
+          <p class="field-help" id="quantModeNote">常规定量使用目的蛋白/上样内参。GSDMB 裂解请选择 N/FL；同一内参在分子与分母中会相消，不再重复除以 GAPDH。</p>
           <p class="field-help">信号建议只分析当前裁剪区域，并按已设置的泳道数定位；请先排除 Marker 和无关泳道。</p>
           <p class="field-help"><strong>Fiji/JAR 对照：</strong>结果中的 IntDen 是按条带极性换算后的 ROI 像素和，未扣除背景；正式归一化仍使用局部背景校正灰度。</p>
           <label>泳道<select id="quantLane"></select></label>
@@ -807,8 +815,8 @@
         <div class="quant-plot-head">
           <div><h3 id="quantPlotTitle">Prism 风格绘图</h3><p>默认沿用你的 Prism 项目参数：Arial、白底及蓝/橙/黄重点配色，多组时自动加宽并旋转标签；目的/内参按生物学重复绘制均值柱、SD 与全部独立点。两组使用双侧非配对 Student t 检验（等方差）；三组及以上使用 ordinary one-way ANOVA + Dunnett（控制组 vs 其它组）。</p></div>
           <div class="quant-plot-toolbar">
-            <label>绘图目的蛋白<select id="quantPlotTarget"></select></label>
-            <div class="quant-plot-loading">绘图内参：<strong id="quantPlotLoadingName">—</strong></div>
+            <label>绘图指标<select id="quantPlotTarget"></select></label>
+            <div class="quant-plot-loading">分母/内参：<strong id="quantPlotLoadingName">—</strong></div>
             <button class="button small primary" id="exportQuantPlotPng" type="button">导出 300 DPI PNG</button>
           </div>
         </div>
@@ -853,8 +861,8 @@
       const MAX_PIXELS = 50_000_000;
       const MAX_PROJECT_FILE_BYTES = 162 * 1024 * 1024;
       const PROJECT_KIND = "blotboard-project";
-      const PROJECT_VERSION = 4;
-      const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, PROJECT_VERSION];
+      const PROJECT_VERSION = 5;
+      const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, 4, PROJECT_VERSION];
       const PROJECT_DB = "blotboard-wb";
       const PROJECT_STORE = "projects";
       const AUTOSAVE_KEY = "current";
@@ -885,7 +893,7 @@
         showBorder: true,
         pngDpi: 300,
         exportProfile: "preserve",
-        quant: { sampleMap: [], rois: {}, loadingKey: "", controlGroup: "Control", locked: false, results: null },
+        quant: { sampleMap: [], rois: {}, loadingKey: "", normalizationMode: "loading", numeratorKey: "", denominatorKey: "", controlGroup: "Control", locked: false, results: null },
         panels: [],
         panelColumns: 2,
         panelGap: 24,
@@ -911,6 +919,7 @@
       let restoringRuntime = false;
       let quantView = null;
       let quantDrag = null;
+      let quantGuide = null;
       let exposureCheck = { rowKey: "", items: [], report: null };
       let exposureRunToken = 0;
       const decodedTiffCache = new WeakMap();
@@ -994,7 +1003,7 @@
           showBorder: snapshot.showBorder,
           pngDpi: snapshot.pngDpi,
           exportProfile: snapshot.exportProfile || "preserve",
-          quant: JSON.parse(JSON.stringify(snapshot.quant || { sampleMap: [], rois: {}, loadingKey: "", controlGroup: "Control", locked: false, results: null })),
+          quant: JSON.parse(JSON.stringify(snapshot.quant || { sampleMap: [], rois: {}, loadingKey: "", normalizationMode: "loading", numeratorKey: "", denominatorKey: "", controlGroup: "Control", locked: false, results: null })),
           panels: snapshot.panels?.map((panel) => ({ ...panel })) || [],
           panelColumns: snapshot.panelColumns || 2,
           panelGap: snapshot.panelGap ?? 24,
@@ -1402,7 +1411,7 @@
         state.showBorder = true;
         state.pngDpi = 300;
         state.exportProfile = "preserve";
-        state.quant = { sampleMap: [], rois: {}, loadingKey: "", controlGroup: "Control", locked: false, results: null };
+        state.quant = { sampleMap: [], rois: {}, loadingKey: "", normalizationMode: "loading", numeratorKey: "", denominatorKey: "", controlGroup: "Control", locked: false, results: null };
         state.panels = [];
         state.panelColumns = 2;
         state.panelGap = 24;
@@ -1639,6 +1648,8 @@
         delete state.quant.rois[row.rowKey];
         if (exposureCheck.rowKey === row.rowKey) { quantView = null; resetExposureCheck(); }
         if (state.quant.loadingKey === row.rowKey) state.quant.loadingKey = "";
+        if (state.quant.numeratorKey === row.rowKey) state.quant.numeratorKey = "";
+        if (state.quant.denominatorKey === row.rowKey) state.quant.denominatorKey = "";
         invalidateQuantResults();
         state.demoLoaded = false;
         markDirty();
@@ -2680,9 +2691,27 @@
         return state.rows.filter((row) => row.sourceFile && /\.tiff?$/i.test(row.sourceName || row.sourceFile.name));
       }
 
+      function quantNormalizationMode() {
+        return state.quant.normalizationMode === "paired-band" ? "paired-band" : "loading";
+      }
+
+      function syncQuantModeUi() {
+        const paired = quantNormalizationMode() === "paired-band";
+        $("#quantNormalizationMode").value = paired ? "paired-band" : "loading";
+        $("#quantLoadingField").hidden = paired;
+        $("#quantNumeratorField").hidden = !paired;
+        $("#quantDenominatorField").hidden = !paired;
+        $("#createCleavagePair").hidden = !paired;
+        $("#calculateQuant").textContent = paired ? "确认当前 ROI 并计算 N/FL" : "确认当前 ROI 并计算";
+        $("#quantModeNote").textContent = paired
+          ? "裂解模式计算同泳道、同一原始 TIFF 的背景校正 N 段/全长（N/FL）；GAPDH 可保留作上样 QC，但不会再次参与这个比值。"
+          : "常规定量计算目的蛋白/上样内参，再相对控制组归一化。";
+      }
+
       function syncQuantSelectors(selectedKey) {
         const rows = quantifiableRows();
-        const selected = selectedKey || $("#quantRow").value || rows.find((row) => row.role === "target")?.rowKey || rows[0]?.rowKey || "";
+        const paired = quantNormalizationMode() === "paired-band";
+        const selected = selectedKey || $("#quantRow").value || (paired ? state.quant.numeratorKey : "") || rows.find((row) => row.role === "target")?.rowKey || rows[0]?.rowKey || "";
         $("#quantRow").replaceChildren(...rows.map((row) => {
           const option = document.createElement("option");
           option.value = row.rowKey;
@@ -2706,6 +2735,28 @@
         const loading = loadingRows.find((row) => row.rowKey === state.quant.loadingKey) || loadingRows[0];
         state.quant.loadingKey = loading?.rowKey || "";
         $("#quantLoading").value = state.quant.loadingKey;
+        const pairedOptions = (placeholder) => {
+          const first = document.createElement("option");
+          first.value = "";
+          first.textContent = placeholder;
+          return [first, ...rows.map((row) => {
+            const option = document.createElement("option");
+            option.value = row.rowKey;
+            option.textContent = row.name;
+            return option;
+          })];
+        };
+        if (!rows.some((row) => row.rowKey === state.quant.numeratorKey)) {
+          state.quant.numeratorKey = rows.find((row) => /(?:^|[-_\s])(n|nt|n段|n端)$/i.test(row.name))?.rowKey || selected || rows[0]?.rowKey || "";
+        }
+        if (!rows.some((row) => row.rowKey === state.quant.denominatorKey) || state.quant.denominatorKey === state.quant.numeratorKey) {
+          state.quant.denominatorKey = rows.find((row) => row.rowKey !== state.quant.numeratorKey && /(?:fl|full[-_\s]?length|全长)$/i.test(row.name))?.rowKey
+            || rows.find((row) => row.rowKey !== state.quant.numeratorKey)?.rowKey || "";
+        }
+        $("#quantNumerator").replaceChildren(...pairedOptions("请选择 N 段条带"));
+        $("#quantDenominator").replaceChildren(...pairedOptions("请选择全长条带"));
+        $("#quantNumerator").value = state.quant.numeratorKey;
+        $("#quantDenominator").value = state.quant.denominatorKey;
         $("#quantControlGroup").replaceChildren(...uniqueGroupNames().map((name) => {
           const option = document.createElement("option");
           option.value = name;
@@ -2720,12 +2771,53 @@
           option.textContent = `第 ${index + 1} 道 · ${resolvedLaneLabels()[index] || ""}`;
           return option;
         }));
+        syncQuantModeUi();
+      }
+
+      async function createCleavagePair() {
+        const source = quantView?.row || state.rows.find((row) => row.rowKey === $("#quantRow").value);
+        if (!source?.sourceFile || !/\.tiff?$/i.test(source.sourceName || source.sourceFile.name)) return toast("请先选择 GSDMB 原始 TIFF");
+        if (state.rows.length >= MAX_ROWS) return toast(`每个图组最多支持 ${MAX_ROWS} 行蛋白`);
+        if (pendingMutations) return toast("当前图片仍在处理中，请等待完成");
+        beginImageMutation();
+        try {
+          const duplicate = await rowFromFile(source.sourceFile);
+          const base = source.name.replace(/(?:[-_\s]?(?:n|nt|n段|n端|fl|full[-_\s]?length|全长))$/i, "") || "GSDMB";
+          source.name = `${base}-N`;
+          source.role = "target";
+          duplicate.name = `${base}-FL`;
+          duplicate.role = "target";
+          duplicate.mw = source.mw;
+          duplicate.membraneId = source.membraneId;
+          duplicate.nonAdjacent = source.nonAdjacent;
+          duplicate.splices = [...(source.splices || [])];
+          duplicate.crop = source.crop ? { ...source.crop } : duplicate.crop;
+          duplicate.brightness = source.brightness;
+          duplicate.contrast = source.contrast;
+          duplicate.backgroundClean = source.backgroundClean || 0;
+          duplicate.rotation = source.rotation || 0;
+          duplicate.invert = source.invert;
+          const sourceIndex = state.rows.findIndex((row) => row.rowKey === source.rowKey);
+          state.rows.splice(sourceIndex + 1, 0, duplicate);
+          state.quant.normalizationMode = "paired-band";
+          state.quant.numeratorKey = source.rowKey;
+          state.quant.denominatorKey = duplicate.rowKey;
+          invalidateQuantResults();
+          markDirty();
+          renderRows();
+          requestRender();
+          syncQuantSelectors(source.rowKey);
+          await loadQuantRow();
+          toast("已用同一原始 TIFF 建立 GSDMB-N 与 GSDMB-FL；请分别拖横线定位两条带");
+        } catch (error) { toast(`无法建立 N/FL：${error.message}`); }
+        finally { endImageMutation(); }
       }
 
       async function openQuant() {
         const rows = quantifiableRows();
         if (!rows.length) return toast("灰度定量需要上传 8-bit 单通道原始 TIFF；PNG/JPG 仍可用于组图");
         ensureSampleMap();
+        state.quant.normalizationMode = quantNormalizationMode();
         syncQuantSelectors();
         renderSampleMap();
         $("#quantMapLocked").checked = state.quant.locked;
@@ -2746,11 +2838,15 @@
           const heightInput = $("#quantRoiHeight");
           heightInput.max = String(Math.max(safeHeight, entry?.lanes?.[0]?.band?.h || 0));
           heightInput.value = String(entry?.lanes?.[0]?.band?.h || defaultHeight);
-          $("#quantPolarity").value = entry?.polarity || "dark";
+          const pairedPolarity = quantNormalizationMode() === "paired-band"
+            ? state.quant.rois[state.quant.numeratorKey]?.polarity || state.quant.rois[state.quant.denominatorKey]?.polarity
+            : "";
+          $("#quantPolarity").value = entry?.polarity || pairedPolarity || "dark";
           $("#quantMembrane").value = row.membraneId || "";
           quantView = { row, decoded };
+          quantGuide = null;
           paintQuantCanvas();
-          const method = entry?.method?.startsWith("row-contrast") ? "信号建议" : entry ? "手动/等宽" : "";
+          const method = entry?.method === "manual-row-line-v1" ? "横线定位" : entry?.method?.startsWith("row-contrast") ? "信号建议" : entry ? "手动/等宽" : "";
           $("#quantStatus").textContent = entry ? `${entry.confirmed ? "已确认" : "待确认"} · ${entry.lanes.length} 条泳道 ROI · ${method}` : "请先按泳道等宽初始化或生成信号建议 ROI。";
           prepareExposureCheck(row);
         } catch (error) { toast(error.message); }
@@ -2817,6 +2913,40 @@
         }
       }
 
+      function startQuantGuide() {
+        if (!quantView) return toast("请先选择要定位的 TIFF 条带行");
+        const entry = state.quant.rois[quantView.row.rowKey];
+        if (entry?.confirmed && !confirm("横线定位会覆盖当前已确认的 ROI，继续吗？")) return;
+        quantGuide = { active: true, pointerId: null, y: null };
+        $("#quantCanvas").focus();
+        $("#quantStatus").textContent = "请在条带中心按住鼠标并上下拖动；松开后会把整排黄色 ROI 对齐，并自动选择局部背景。";
+        paintQuantCanvas();
+      }
+
+      function applyQuantGuide(y) {
+        const row = quantView?.row;
+        const decoded = quantView?.decoded;
+        if (!row || !decoded) return;
+        try {
+          const crop = row.crop ? fitAspectCrop(row, row.crop) : { x: 0, y: 0, w: decoded.width, h: decoded.height };
+          const requestedHeight = Math.round(Number($("#quantRoiHeight").value));
+          const roiHeight = Math.max(2, Math.min(Math.floor(crop.h * .36), Number.isFinite(requestedHeight) ? requestedHeight : Math.round(crop.h * .22)));
+          const placed = window.WBCore.laneRoisAtBandCenter({ pixels: decoded.pixels, width: decoded.width, height: decoded.height, crop, laneCount: totalSamples(), polarity: $("#quantPolarity").value, bandCenterY: y, roiHeight });
+          state.quant.rois[row.rowKey] = {
+            polarity: $("#quantPolarity").value === "bright" ? "bright" : "dark",
+            confirmed: false,
+            method: placed.method,
+            lanes: placed.lanes.map((lane) => ({ band: lane.band, background: lane.background })),
+          };
+          $("#quantRoiHeight").value = String(roiHeight);
+          invalidateQuantResults();
+          invalidateExposureReport();
+          markDirty();
+          $("#quantStatus").textContent = `已按横线定位 ${totalSamples()} 条泳道；请检查黄色条带框和蓝色局部背景框，再确认计算。`;
+        } catch (error) { toast(`横线定位失败：${error.message}`); }
+        paintQuantCanvas();
+      }
+
       function markQuantRoiAdjusted(entry) {
         entry.method = entry.method?.startsWith("row-contrast") ? "row-contrast-v1+manual" : "manual";
         entry.confirmed = false;
@@ -2837,8 +2967,22 @@
         const ctx = canvas.getContext("2d");
         ctx.fillStyle = "#111827";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(row.image, 0, 0, canvas.width, canvas.height);
         const entry = state.quant.rois[row.rowKey];
+        const invertedPreview = (entry?.polarity || $("#quantPolarity").value) === "bright";
+        ctx.filter = invertedPreview ? "invert(1)" : "none";
+        ctx.drawImage(row.image, 0, 0, canvas.width, canvas.height);
+        ctx.filter = "none";
+        if (quantGuide?.active && Number.isFinite(quantGuide.y)) {
+          const crop = row.crop ? fitAspectCrop(row, row.crop) : { x: 0, y: 0, w: decoded.width, h: decoded.height };
+          ctx.strokeStyle = "#ffd43b";
+          ctx.lineWidth = 3;
+          ctx.setLineDash([10, 6]);
+          ctx.beginPath();
+          ctx.moveTo(crop.x * scale, quantGuide.y * scale);
+          ctx.lineTo((crop.x + crop.w) * scale, quantGuide.y * scale);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
         if (!entry) return;
         const selectedLane = Number($("#quantLane").value || 0);
         const selectedType = $("#quantRoiType").value;
@@ -2861,6 +3005,18 @@
         const entry = quantView && state.quant.rois[quantView.row.rowKey];
         const lane = entry?.lanes[Number($("#quantLane").value || 0)];
         return lane?.[$("#quantRoiType").value] || null;
+      }
+
+      function hitQuantRoi(x, y) {
+        const entry = quantView && state.quant.rois[quantView.row.rowKey];
+        if (!entry) return null;
+        for (const type of ["band", "background"]) {
+          for (let laneIndex = 0; laneIndex < entry.lanes.length; laneIndex += 1) {
+            const roi = entry.lanes[laneIndex][type];
+            if (x >= roi.x && x <= roi.x + roi.w && y >= roi.y && y <= roi.y + roi.h) return { laneIndex, type, roi };
+          }
+        }
+        return null;
       }
 
       function clampQuantRoi(roi) {
@@ -3094,26 +3250,42 @@
         currentEntry.confirmed = true;
         currentEntry.polarity = $("#quantPolarity").value === "bright" ? "bright" : "dark";
         state.quant.locked = $("#quantMapLocked").checked;
-        state.quant.loadingKey = $("#quantLoading").value;
+        state.quant.normalizationMode = quantNormalizationMode();
+        if (state.quant.normalizationMode === "loading") state.quant.loadingKey = $("#quantLoading").value;
         state.quant.controlGroup = $("#quantControlGroup").value;
         if (!state.quant.locked) return toast("请先核对样本映射，并勾选“已核对泳道顺序、样本和重复”");
         const mappingIssue = sampleMapIssue();
         if (mappingIssue) return toast(mappingIssue);
-        const loadingRow = state.rows.find((row) => row.rowKey === state.quant.loadingKey);
-        const targetRows = state.rows.filter((row) => row.role === "target" && quantifiableRows().includes(row));
-        const required = [...targetRows, loadingRow].filter(Boolean);
+        const paired = state.quant.normalizationMode === "paired-band";
+        const numeratorRow = paired ? state.rows.find((row) => row.rowKey === state.quant.numeratorKey) : null;
+        const denominatorRow = paired ? state.rows.find((row) => row.rowKey === state.quant.denominatorKey) : null;
+        const loadingRow = paired ? denominatorRow : state.rows.find((row) => row.rowKey === state.quant.loadingKey);
+        const targetRows = paired ? [numeratorRow].filter(Boolean) : state.rows.filter((row) => row.role === "target" && quantifiableRows().includes(row));
+        if (paired && (!numeratorRow || !denominatorRow)) return toast("请分别选择 GSDMB-N 与 GSDMB-FL 条带行");
+        if (paired && numeratorRow.rowKey === denominatorRow.rowKey) return toast("N 段与全长必须是两套独立 ROI；可点击“用当前 TIFF 建立 N/FL”");
+        if (paired) {
+          const hasBothHashes = Boolean(numeratorRow.sourceSha256 && denominatorRow.sourceSha256);
+          const sameHash = hasBothHashes && numeratorRow.sourceSha256 === denominatorRow.sourceSha256;
+          const sameFileMetadata = numeratorRow.sourceName === denominatorRow.sourceName && numeratorRow.sourceBytes === denominatorRow.sourceBytes && numeratorRow.sourceLastModified === denominatorRow.sourceLastModified;
+          if (hasBothHashes ? !sameHash : !sameFileMetadata) return toast("N/FL 只允许来自同一原始 TIFF、同一曝光的两条带；请使用“用当前 TIFF 建立 N/FL”");
+        }
+        const required = paired ? [numeratorRow, denominatorRow] : [...targetRows, loadingRow].filter(Boolean);
         const missing = required.filter((row) => !state.quant.rois[row.rowKey]?.confirmed);
         if (missing.length) {
           markDirty();
-          return toast(`已确认当前 ROI；还需依次核对：${missing.map((row) => row.name).join("、")}`);
+          $("#quantRow").value = missing[0].rowKey;
+          await loadQuantRow();
+          return toast(`已确认当前 ROI；还需核对：${missing.map((row) => row.name).join("、")}`);
         }
-        if (!loadingRow) return toast("请指定内参条带行");
-        if (loadingRow.role !== "loading") return toast("所选内参行的定量角色不是“内参”，请重新指定");
-        if (targetRows.some((row) => row.rowKey === loadingRow.rowKey)) return toast("同一条带行不能同时作为目的蛋白和内参");
-        if (!targetRows.length) return toast("请至少把一条 TIFF 行设为目的蛋白");
-        if (!loadingRow.membraneId) return toast("请为内参填写膜编号");
-        const mismatch = targetRows.find((row) => !row.membraneId || row.membraneId !== loadingRow.membraneId);
-        if (mismatch) return toast(`${mismatch.name} 与内参的膜编号不一致；跨膜结果不会自动归一化`);
+        if (!paired) {
+          if (!loadingRow) return toast("请指定内参条带行");
+          if (loadingRow.role !== "loading") return toast("所选内参行的定量角色不是“内参”，请重新指定");
+          if (targetRows.some((row) => row.rowKey === loadingRow.rowKey)) return toast("同一条带行不能同时作为目的蛋白和内参");
+          if (!targetRows.length) return toast("请至少把一条 TIFF 行设为目的蛋白");
+          if (!loadingRow.membraneId) return toast("请为内参填写膜编号");
+          const mismatch = targetRows.find((row) => !row.membraneId || row.membraneId !== loadingRow.membraneId);
+          if (mismatch) return toast(`${mismatch.name} 与内参的膜编号不一致；跨膜结果不会自动归一化`);
+        }
         beginImageMutation();
         try {
           const measure = async (row) => {
@@ -3128,21 +3300,37 @@
           const loading = await measure(loadingRow);
           const targets = [];
           for (const row of targetRows) targets.push(await measure(row));
-          const normalized = window.WBCore.normalizeMeasurements(targets, loading, state.quant.sampleMap, state.quant.controlGroup);
+          let normalized;
+          if (paired) {
+            if (state.quant.rois[numeratorRow.rowKey].polarity !== state.quant.rois[denominatorRow.rowKey].polarity) throw new Error("N 段与全长必须使用相同的常规/反转定量方式");
+            const numerator = { ...targets[0], name: `${numeratorRow.name} / ${denominatorRow.name}` };
+            const highClipping = state.quant.sampleMap.some((sample, index) => !sample.excluded
+              && [numerator.lanes[index], loading.lanes[index]].some((measurement) => measurement.qc.includes("SIGNAL_SATURATION_HIGH") || measurement.qc.includes("BACKGROUND_CLIPPING_HIGH")));
+            if (highClipping) throw new Error("N 段或全长存在 ≥1% 端点饱和/背景裁切，不能计算可靠 N/FL");
+            normalized = window.WBCore.normalizeCleavageMeasurements(numerator, loading, state.quant.sampleMap, state.quant.controlGroup);
+          } else {
+            normalized = window.WBCore.normalizeMeasurements(targets, loading, state.quant.sampleMap, state.quant.controlGroup);
+          }
           const invalidTargets = targets.filter((target) => !normalized.some((row) => row.targetKey === target.key && !row.excluded && row.foldChange !== null));
           if (invalidTargets.length) throw new Error(`${invalidTargets.map((target) => target.name).join("、")} 缺少有效控制基线或有效灰度，无法生成 Prism 数据`);
           state.quant.results = {
             computedAt: new Date().toISOString(),
+            normalizationMode: paired ? "paired-band" : "loading",
+            ratioFormula: paired ? "N/FL" : "target/loading",
+            numeratorKey: paired ? numeratorRow.rowKey : "",
+            numeratorName: paired ? numeratorRow.name : "",
+            denominatorKey: paired ? denominatorRow.rowKey : "",
+            denominatorName: paired ? denominatorRow.name : "",
             loadingKey: loadingRow.rowKey,
             loadingName: loadingRow.name,
-            membraneId: loadingRow.membraneId,
+            membraneId: loadingRow.membraneId || numeratorRow?.membraneId || "same-source TIFF",
             normalized,
             summary: window.WBCore.summarizeNormalized(normalized),
           };
           markDirty();
           renderQuantResults();
           $("#quantStatus").textContent = `已从原始 TIFF 重算 ${normalized.length} 条结果；预览调整未参与计算。`;
-          toast("灰度定量完成，可直接导出 Prism 列式数据");
+          toast(paired ? "GSDMB N/FL 已计算，可直接绘图和导出" : "灰度定量完成，可直接导出 Prism 列式数据");
         } catch (error) { toast(`定量失败：${error.message}`); }
         finally { endImageMutation(); }
       }
@@ -3157,7 +3345,10 @@
           return;
         }
         const rows = results.normalized;
-        container.innerHTML = `<table><thead><tr><th>目的蛋白</th><th>样本</th><th>组别</th><th>生物学重复</th><th title="按当前条带极性换算的 ROI 像素和；未扣除背景，仅用于与 Fiji/JAR 核对">IntDen（Fiji 对照）</th><th>背景校正灰度</th><th>目的/内参</th><th>Fold</th><th>QC</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${xml(row.target)}</td><td>${xml(row.sampleId)}</td><td>${xml(row.group)}</td><td>${xml(row.biologicalReplicate)}</td><td>${Number(row.targetMeasurement.fijiIntDen).toFixed(3)}</td><td>${Number(row.targetMeasurement.corrected).toFixed(3)}</td><td>${row.ratio === null ? "NA" : Number(row.ratio).toFixed(4)}</td><td>${row.foldChange === null ? "NA" : Number(row.foldChange).toFixed(4)}</td><td>${xml([...new Set(row.qc)].join("; "))}</td></tr>`).join("")}</tbody></table>`;
+        const paired = results.normalizationMode === "paired-band";
+        container.innerHTML = paired
+          ? `<table><thead><tr><th>裂解指标</th><th>样本</th><th>组别</th><th>生物学重复</th><th title="未扣背景，仅用于与 Fiji/JAR 核对">N IntDen</th><th>FL IntDen</th><th>N 背景校正</th><th>FL 背景校正</th><th>N/FL</th><th>相对对照 Fold</th><th>QC</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${xml(row.target)}</td><td>${xml(row.sampleId)}</td><td>${xml(row.group)}</td><td>${xml(row.biologicalReplicate)}</td><td>${Number(row.fragmentMeasurement.fijiIntDen).toFixed(3)}</td><td>${Number(row.fullLengthMeasurement.fijiIntDen).toFixed(3)}</td><td>${Number(row.fragmentMeasurement.corrected).toFixed(3)}</td><td>${Number(row.fullLengthMeasurement.corrected).toFixed(3)}</td><td>${row.fragmentFullLengthRatio === null ? "NA" : Number(row.fragmentFullLengthRatio).toFixed(4)}</td><td>${row.foldChange === null ? "NA" : Number(row.foldChange).toFixed(4)}</td><td>${xml([...new Set(row.qc)].join("; "))}</td></tr>`).join("")}</tbody></table>`
+          : `<table><thead><tr><th>目的蛋白</th><th>样本</th><th>组别</th><th>生物学重复</th><th title="按当前条带极性换算的 ROI 像素和；未扣除背景，仅用于与 Fiji/JAR 核对">IntDen（Fiji 对照）</th><th>背景校正灰度</th><th>目的/内参</th><th>Fold</th><th>QC</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${xml(row.target)}</td><td>${xml(row.sampleId)}</td><td>${xml(row.group)}</td><td>${xml(row.biologicalReplicate)}</td><td>${Number(row.targetMeasurement.fijiIntDen).toFixed(3)}</td><td>${Number(row.targetMeasurement.corrected).toFixed(3)}</td><td>${row.ratio === null ? "NA" : Number(row.ratio).toFixed(4)}</td><td>${row.foldChange === null ? "NA" : Number(row.foldChange).toFixed(4)}</td><td>${xml([...new Set(row.qc)].join("; "))}</td></tr>`).join("")}</tbody></table>`;
         syncQuantPlotTarget();
         renderQuantPlot();
       }
@@ -3194,7 +3385,7 @@
           || "";
         select.value = preferred;
         select.disabled = !targets.length;
-        $("#quantPlotLoadingName").textContent = state.quant.results?.loadingName || "—";
+        $("#quantPlotLoadingName").textContent = state.quant.results?.normalizationMode === "paired-band" ? `${state.quant.results.denominatorName}（N/FL）` : state.quant.results?.loadingName || "—";
         $("#exportQuantPlotPng").disabled = !targets.length;
         return preferred;
       }
@@ -3219,6 +3410,8 @@
           targetKey: selectedKey,
           targetName: rows[0].target,
           loadingName: results.loadingName,
+          normalizationMode: results.normalizationMode || "loading",
+          ratioFormula: results.ratioFormula || "target/loading",
           controlGroup: state.quant.controlGroup,
           groups,
           statistics,
@@ -3408,10 +3601,12 @@
         ctx.rotate(-Math.PI / 2);
         ctx.fillStyle = "#000";
         ctx.textAlign = "center";
-        fitCanvasText(ctx, "Relative protein expression", plot.height - 8, 12, 8);
-        ctx.fillText("Relative protein expression", 0, -6, plot.height - 8);
-        fitCanvasText(ctx, `(${model.loadingName} adjusted)`, plot.height - 8, 12, 8);
-        ctx.fillText(`(${model.loadingName} adjusted)`, 0, 8, plot.height - 8);
+        const yAxisTitle = model.normalizationMode === "paired-band" ? "Cleavage ratio" : "Relative protein expression";
+        const yAxisSubtitle = model.normalizationMode === "paired-band" ? "(N / full-length)" : `(${model.loadingName} adjusted)`;
+        fitCanvasText(ctx, yAxisTitle, plot.height - 8, 12, 8);
+        ctx.fillText(yAxisTitle, 0, -6, plot.height - 8);
+        fitCanvasText(ctx, yAxisSubtitle, plot.height - 8, 12, 8);
+        ctx.fillText(yAxisSubtitle, 0, 8, plot.height - 8);
         ctx.restore();
 
         ctx.fillStyle = "#000";
@@ -3446,9 +3641,11 @@
           const pLabel = model.groups.length === 2 ? "P" : "adjusted P";
           const comparisons = model.statistics.comparisons.map((comparison) => `${comparison.controlGroup} vs ${comparison.group}: ${pLabel}=${formatAdjustedP(comparison.pAdjusted)}${significanceStars(comparison.pAdjusted) ? ` (${significanceStars(comparison.pAdjusted)})` : " (ns)"}`).join("；");
           const omitted = significant.length > displayedSignificant.length ? ` 图中仅显示前 ${displayedSignificant.length} 条显著性括号；全部比较与 P 值见此处及 Plot_Stats。` : "";
-          status.textContent = `${model.targetName} / ${model.loadingName}；${groupStatus}。柱=均值，误差线=SD；${method}，df=${model.statistics.df}；${comparisons}。${omitted}`;
+          const metric = model.normalizationMode === "paired-band" ? "N/FL（不再除 GAPDH）" : `${model.targetName} / ${model.loadingName}`;
+          status.textContent = `${metric}；${groupStatus}。柱=均值，误差线=SD；${method}，df=${model.statistics.df}；${comparisons}。${omitted}`;
         } else {
-          status.textContent = `${model.targetName} / ${model.loadingName}；${groupStatus}。已绘制均值、SD 和独立点；未运行统计检验：${model.statisticsError}`;
+          const metric = model.normalizationMode === "paired-band" ? "N/FL（不再除 GAPDH）" : `${model.targetName} / ${model.loadingName}`;
+          status.textContent = `${metric}；${groupStatus}。已绘制均值、SD 和独立点；未运行统计检验：${model.statisticsError}`;
         }
         return model;
       }
@@ -3464,6 +3661,21 @@
       function quantDetailRows() {
         const results = state.quant.results;
         if (!results) return [];
+        if (results.normalizationMode === "paired-band") {
+          return [["metric", "ratio_formula", "lane", "sample_id", "group", "biological_replicate", "technical_replicate", "excluded", "exclusion_note", "fragment_roi_method", "full_length_roi_method", "fragment_band_x", "fragment_band_y", "fragment_band_w", "fragment_band_h", "fragment_background_x", "fragment_background_y", "fragment_background_w", "fragment_background_h", "fragment_band_sum", "fragment_band_mean", "fragment_fiji_intden", "fragment_background_sum", "fragment_background_mean", "fragment_background_sd", "fragment_corrected", "fragment_signal_clipped_count", "fragment_signal_clipped_fraction", "fragment_background_clipped_count", "fragment_background_clipped_fraction", "full_length_band_x", "full_length_band_y", "full_length_band_w", "full_length_band_h", "full_length_background_x", "full_length_background_y", "full_length_background_w", "full_length_background_h", "full_length_band_sum", "full_length_band_mean", "full_length_fiji_intden", "full_length_background_sum", "full_length_background_mean", "full_length_background_sd", "full_length_corrected", "full_length_signal_clipped_count", "full_length_signal_clipped_fraction", "full_length_background_clipped_count", "full_length_background_clipped_fraction", "fragment_full_length_ratio", "control_mean_ratio", "fold_change", "qc_codes"], ...results.normalized.map((row) => [
+            row.target, "N/FL", row.lane, row.sampleId, row.group, row.biologicalReplicate, row.technicalReplicate, row.excluded, row.exclusionNote,
+            state.quant.rois[results.numeratorKey]?.method || "manual", state.quant.rois[results.denominatorKey]?.method || "manual",
+            row.fragmentMeasurement.band.x, row.fragmentMeasurement.band.y, row.fragmentMeasurement.band.w, row.fragmentMeasurement.band.h,
+            row.fragmentMeasurement.background.x, row.fragmentMeasurement.background.y, row.fragmentMeasurement.background.w, row.fragmentMeasurement.background.h,
+            row.fragmentMeasurement.bandSum, row.fragmentMeasurement.bandMean, row.fragmentMeasurement.fijiIntDen, row.fragmentMeasurement.backgroundSum, row.fragmentMeasurement.backgroundMean, row.fragmentMeasurement.backgroundSd, row.fragmentMeasurement.corrected,
+            row.fragmentMeasurement.signalClippedCount, row.fragmentMeasurement.signalClippedFraction, row.fragmentMeasurement.backgroundClippedCount, row.fragmentMeasurement.backgroundClippedFraction,
+            row.fullLengthMeasurement.band.x, row.fullLengthMeasurement.band.y, row.fullLengthMeasurement.band.w, row.fullLengthMeasurement.band.h,
+            row.fullLengthMeasurement.background.x, row.fullLengthMeasurement.background.y, row.fullLengthMeasurement.background.w, row.fullLengthMeasurement.background.h,
+            row.fullLengthMeasurement.bandSum, row.fullLengthMeasurement.bandMean, row.fullLengthMeasurement.fijiIntDen, row.fullLengthMeasurement.backgroundSum, row.fullLengthMeasurement.backgroundMean, row.fullLengthMeasurement.backgroundSd, row.fullLengthMeasurement.corrected,
+            row.fullLengthMeasurement.signalClippedCount, row.fullLengthMeasurement.signalClippedFraction, row.fullLengthMeasurement.backgroundClippedCount, row.fullLengthMeasurement.backgroundClippedFraction,
+            row.fragmentFullLengthRatio ?? "NA", row.controlMeanFragmentFullLengthRatio ?? "NA", row.foldChange ?? "NA", [...new Set(row.qc)].join(";"),
+          ])];
+        }
         return [["target", "lane", "sample_id", "group", "biological_replicate", "technical_replicate", "excluded", "exclusion_note", "target_roi_method", "loading_roi_method", "target_band_x", "target_band_y", "target_band_w", "target_band_h", "target_background_x", "target_background_y", "target_background_w", "target_background_h", "target_band_sum", "target_band_mean", "target_fiji_intden", "target_background_sum", "target_background_mean", "target_background_sd", "target_corrected", "target_signal_clipped_count", "target_signal_clipped_fraction", "target_background_clipped_count", "target_background_clipped_fraction", "loading_band_x", "loading_band_y", "loading_band_w", "loading_band_h", "loading_background_x", "loading_background_y", "loading_background_w", "loading_background_h", "loading_band_sum", "loading_band_mean", "loading_fiji_intden", "loading_background_sum", "loading_background_mean", "loading_background_sd", "loading_corrected", "loading_signal_clipped_count", "loading_signal_clipped_fraction", "loading_background_clipped_count", "loading_background_clipped_fraction", "target_loading_ratio", "control_mean", "fold_change", "qc_codes"], ...results.normalized.map((row) => [
           row.target, row.lane, row.sampleId, row.group, row.biologicalReplicate, row.technicalReplicate, row.excluded, row.exclusionNote,
           state.quant.rois[row.targetKey]?.method || "manual", state.quant.rois[results.loadingKey]?.method || "manual",
@@ -3497,8 +3709,9 @@
         const rows = [
           ["key", "value"],
           ["target", model.targetName],
-          ["loading_control", model.loadingName],
-          ["metric", "target/loading biological-replicate ratio"],
+          [model.normalizationMode === "paired-band" ? "full_length_denominator" : "loading_control", model.loadingName],
+          ["metric", model.normalizationMode === "paired-band" ? "background-corrected N/full-length biological-replicate ratio" : "target/loading biological-replicate ratio"],
+          ["ratio_formula", model.ratioFormula],
           ["plot", "bar mean with sample SD and all biological replicate points"],
           ["statistics", method],
           ["control_group", model.controlGroup],
@@ -3521,6 +3734,7 @@
       function quantWorkbookSheets() {
         const results = state.quant.results;
         if (!results) return [];
+        const paired = results.normalizationMode === "paired-band";
         const prism = window.WBCore.prismColumnTables(results.normalized);
         const plotModel = quantPlotModel();
         const plotColors = plotModel ? window.WBCore.prismPlotColors(plotModel.groups.length) : [];
@@ -3528,11 +3742,13 @@
           { name: "Sample_Map", rows: [["lane", "sample_id", "lane_label", "group", "biological_replicate", "technical_replicate", "excluded", "exclusion_note"], ...state.quant.sampleMap.map((sample, index) => [sample.lane, sample.sampleId, state.laneLabels[index] || sample.sampleId, sample.group, sample.biologicalReplicate, sample.technicalReplicate, sample.excluded, sample.exclusionNote])] },
           { name: "ROI_Methods", rows: [["row_key", "protein", "role", "method", "confirmed"], ...state.rows.filter((row) => state.quant.rois[row.rowKey]).map((row) => [row.rowKey, row.name, row.role, state.quant.rois[row.rowKey].method || "manual", state.quant.rois[row.rowKey].confirmed])] },
           { name: "ROI_Raw", rows: quantDetailRows() },
-          { name: "Normalized", rows: [["target", "sample_id", "group", "biological_replicate", "ratio", "control_mean", "fold_change", "qc"], ...results.normalized.map((row) => [row.target, row.sampleId, row.group, row.biologicalReplicate, row.ratio ?? "NA", row.controlMean ?? "NA", row.foldChange ?? "NA", [...new Set(row.qc)].join(";")])] },
+          { name: "Normalized", rows: paired
+            ? [["metric", "ratio_formula", "sample_id", "group", "biological_replicate", "fragment_full_length_ratio", "control_mean_ratio", "fold_change", "qc"], ...results.normalized.map((row) => [row.target, "N/FL", row.sampleId, row.group, row.biologicalReplicate, row.fragmentFullLengthRatio ?? "NA", row.controlMeanFragmentFullLengthRatio ?? "NA", row.foldChange ?? "NA", [...new Set(row.qc)].join(";")])]
+            : [["target", "sample_id", "group", "biological_replicate", "ratio", "control_mean", "fold_change", "qc"], ...results.normalized.map((row) => [row.target, row.sampleId, row.group, row.biologicalReplicate, row.ratio ?? "NA", row.controlMean ?? "NA", row.foldChange ?? "NA", [...new Set(row.qc)].join(";")])] },
           { name: "Summary", rows: [["target", "group", "n", "mean", "sd"], ...results.summary.map((row) => [row.target, row.group, row.n, row.mean ?? "NA", row.sd ?? "NA"])] },
           { name: "QC", rows: [["target", "sample_id", "codes"], ...results.normalized.map((row) => [row.target, row.sampleId, [...new Set(row.qc)].join(";")])] },
           ...(plotModel ? [{ name: "Plot_Data", rows: quantPlotDataRows(plotModel) }, { name: "Plot_Stats", rows: quantPlotStatisticsRows(plotModel) }] : []),
-          { name: "Metadata", rows: [["key", "value"], ["engine_version", window.WBCore.ENGINE_VERSION], ["computed_at_utc", results.computedAt], ["project_id", state.projectId], ["loading_control", results.loadingName], ["membrane_id", results.membraneId], ["control_group", state.quant.controlGroup], ["plot_target", plotModel?.targetName || "NA"], ["plot_metric", "target/loading biological-replicate ratio"], ["plot_style", "User Prism 10.4.1 reference; dynamic group-count canvas; Arial; mean with sample SD and all points"], ["plot_group_colors", plotModel ? plotModel.groups.map((group, index) => `${group.name}=${plotColors[index].toUpperCase()}`).join("; ") : "NA"], ["note", "All values recalculated from original 8-bit TIFF pixels; preview adjustments were ignored."], ["fiji_intden_note", "Polarity-adjusted band ROI pixel sum for Fiji/JAR comparison only; no background subtraction."], ["linear_range_note", "No endpoint saturation does not prove linear detection range."]] },
+          { name: "Metadata", rows: [["key", "value"], ["engine_version", window.WBCore.ENGINE_VERSION], ["computed_at_utc", results.computedAt], ["project_id", state.projectId], ["normalization_mode", paired ? "paired-band cleavage" : "loading control"], ["ratio_formula", results.ratioFormula], [paired ? "fragment_numerator" : "target", paired ? results.numeratorName : plotModel?.targetName || "NA"], [paired ? "full_length_denominator" : "loading_control", paired ? results.denominatorName : results.loadingName], ["gapdh_in_cleavage_ratio", paired ? "not used; cancels algebraically in N/FL" : "NA"], ["membrane_id", results.membraneId], ["control_group", state.quant.controlGroup], ["plot_target", plotModel?.targetName || "NA"], ["plot_metric", paired ? "background-corrected N/full-length biological-replicate ratio" : "target/loading biological-replicate ratio"], ["plot_style", "User Prism 10.4.1 reference; dynamic group-count canvas; Arial; mean with sample SD and all points"], ["plot_group_colors", plotModel ? plotModel.groups.map((group, index) => `${group.name}=${plotColors[index].toUpperCase()}`).join("; ") : "NA"], ["note", "All values recalculated from original 8-bit TIFF pixels; inverted preview never overwrote the source TIFF."], ["fiji_intden_note", "Polarity-adjusted band ROI pixel sum for Fiji/JAR comparison only; no background subtraction."], ["linear_range_note", "No endpoint saturation does not prove linear detection range."]] },
           ...prism.map((table) => ({ name: `Prism_${table.name}`, rows: table.rows })),
         ];
       }
@@ -3551,10 +3767,11 @@
         });
         const plotModel = quantPlotModel();
         if (plotModel) {
-          entries.push({ name: `${prefix}prism/${safeFilePart(plotModel.targetName)}-target-loading-ratio.csv`, data: rowsToCsv(quantPlotDataRows(plotModel)) });
+          entries.push({ name: `${prefix}prism/${safeFilePart(plotModel.targetName)}-${plotModel.normalizationMode === "paired-band" ? "n-fl" : "target-loading"}-ratio.csv`, data: rowsToCsv(quantPlotDataRows(plotModel)) });
           entries.push({ name: `${prefix}prism/${safeFilePart(plotModel.targetName)}-plot-statistics.csv`, data: rowsToCsv(quantPlotStatisticsRows(plotModel)) });
         }
-        entries.push({ name: `${prefix}prism/README.txt`, data: "GraphPad Prism Column 数据\r\n\r\n每个目的蛋白都有独立 Fold CSV 和单工作表 XLSX。第一行为实验组，后续每行为一个生物学重复；可在 Prism 新建 Column table 后直接导入或复制粘贴。技术重复已先在同一生物学重复内取均值。另附当前网页绘图所用的目的/内参比值 CSV 与统计结果 CSV，确保图、数据和 P 值可以互相追溯。\r\n" });
+        const paired = state.quant.results.normalizationMode === "paired-band";
+        entries.push({ name: `${prefix}prism/README.txt`, data: `GraphPad Prism Column 数据\r\n\r\n每个指标都有独立 Fold CSV 和单工作表 XLSX。第一行为实验组，后续每行为一个生物学重复；可在 Prism 新建 Column table 后直接导入或复制粘贴。技术重复已先在同一生物学重复内取均值。${paired ? "本次裂解指标为同泳道、同一原始 TIFF 的背景校正 N/FL；GAPDH 不再次参与该比值。" : "本次指标为目的蛋白/上样内参。"}另附网页绘图数据与统计结果 CSV，确保图、数据和 P 值可以互相追溯。\r\n` });
         return entries;
       }
 
@@ -3825,7 +4042,7 @@
           projectId: state.projectId,
           layout: layoutTemplate(),
           rows: state.rows.map((row) => ({ rowKey: row.rowKey, name: row.name, mw: row.mw, role: row.role, membraneId: row.membraneId, nonAdjacent: row.nonAdjacent, splices: row.splices, crop: row.crop, brightness: row.brightness, contrast: row.contrast, backgroundClean: row.backgroundClean || 0, rotation: row.rotation || 0, invert: row.invert })),
-          quant: { sampleMap: state.quant.sampleMap, rois: state.quant.rois, loadingKey: state.quant.loadingKey, controlGroup: state.quant.controlGroup, locked: state.quant.locked },
+          quant: { sampleMap: state.quant.sampleMap, rois: state.quant.rois, loadingKey: state.quant.loadingKey, normalizationMode: quantNormalizationMode(), numeratorKey: state.quant.numeratorKey, denominatorKey: state.quant.denominatorKey, controlGroup: state.quant.controlGroup, locked: state.quant.locked },
         };
       }
 
@@ -3999,6 +4216,9 @@
               sampleMap: state.quant.sampleMap,
               rois: state.quant.rois,
               loadingKey: state.quant.loadingKey,
+              normalizationMode: quantNormalizationMode(),
+              numeratorKey: state.quant.numeratorKey,
+              denominatorKey: state.quant.denominatorKey,
               controlGroup: state.quant.controlGroup,
               locked: state.quant.locked,
             }
@@ -4163,7 +4383,7 @@
           exportProfile: JOURNAL_PROFILES[settings.exportProfile] ? settings.exportProfile : "preserve",
           panelColumns: Number.isInteger(settings.panelColumns) && settings.panelColumns >= 1 && settings.panelColumns <= 3 ? settings.panelColumns : 2,
           panelGap: Number.isFinite(settings.panelGap) && settings.panelGap >= 4 && settings.panelGap <= 80 ? settings.panelGap : 24,
-          quant: { sampleMap: [], rois: {}, loadingKey: "", controlGroup: groups[0]?.name || "", locked: false, results: null },
+          quant: { sampleMap: [], rois: {}, loadingKey: "", normalizationMode: "loading", numeratorKey: "", denominatorKey: "", controlGroup: groups[0]?.name || "", locked: false, results: null },
         };
         if (normalizedSettings.laneWidth !== normalizedSettings.rowHeight) throw new Error("泳道宽度与条带高度必须一致");
         if (!Array.isArray(project.rows) || project.rows.length > MAX_ROWS) throw new Error(`项目条带行不能超过 ${MAX_ROWS} 行`);
@@ -4216,12 +4436,15 @@
               const roi = (candidate) => candidate && [candidate.x, candidate.y, candidate.w, candidate.h].every(Number.isFinite) ? { x: candidate.x, y: candidate.y, w: candidate.w, h: candidate.h } : null;
               return { band: roi(lane?.band), background: roi(lane?.background) };
             });
-            if (lanes.every((lane) => lane.band && lane.background)) rois[rowKey] = { polarity: value.polarity === "bright" ? "bright" : "dark", confirmed: Boolean(value.confirmed), method: ["manual", "uniform-v1", "row-contrast-v1", "row-contrast-v1+manual"].includes(value.method) ? value.method : "manual", lanes };
+            if (lanes.every((lane) => lane.band && lane.background)) rois[rowKey] = { polarity: value.polarity === "bright" ? "bright" : "dark", confirmed: Boolean(value.confirmed), method: ["manual", "uniform-v1", "uniform-v2", "row-contrast-v1", "row-contrast-v1+manual", "manual-row-line-v1"].includes(value.method) ? value.method : "manual", lanes };
           });
           normalizedSettings.quant = {
             sampleMap,
             rois,
             loadingKey: rowKeys.has(quant.loadingKey) ? quant.loadingKey : "",
+            normalizationMode: project.version >= 5 && quant.normalizationMode === "paired-band" ? "paired-band" : "loading",
+            numeratorKey: project.version >= 5 && rowKeys.has(quant.numeratorKey) ? quant.numeratorKey : "",
+            denominatorKey: project.version >= 5 && rowKeys.has(quant.denominatorKey) ? quant.denominatorKey : "",
             controlGroup: typeof quant.controlGroup === "string" ? quant.controlGroup.slice(0, 80) : groups[0]?.name || "",
             locked: Boolean(quant.locked) && sampleMap.length === laneCount,
             results: null,
@@ -4984,6 +5207,14 @@
 
       document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => $("#" + button.dataset.closeDialog).close()));
 
+      $("#quantNormalizationMode").addEventListener("change", async (event) => {
+        state.quant.normalizationMode = event.target.value === "paired-band" ? "paired-band" : "loading";
+        invalidateQuantResults();
+        syncQuantSelectors();
+        markDirty();
+        await loadQuantRow();
+        renderQuantResults();
+      });
       $("#quantRow").addEventListener("change", async () => { await loadQuantRow(); renderQuantResults(); });
       $("#quantLoading").addEventListener("change", (event) => {
         state.quant.loadingKey = event.target.value;
@@ -4996,9 +5227,36 @@
         renderRows();
       });
       $("#quantControlGroup").addEventListener("change", (event) => { state.quant.controlGroup = event.target.value; invalidateQuantResults(); markDirty(); });
+      $("#quantNumerator").addEventListener("change", async (event) => {
+        state.quant.numeratorKey = event.target.value;
+        invalidateQuantResults();
+        markDirty();
+        if (event.target.value) { $("#quantRow").value = event.target.value; await loadQuantRow(); }
+      });
+      $("#quantDenominator").addEventListener("change", async (event) => {
+        state.quant.denominatorKey = event.target.value;
+        invalidateQuantResults();
+        markDirty();
+        if (event.target.value) { $("#quantRow").value = event.target.value; await loadQuantRow(); }
+      });
       $("#quantPolarity").addEventListener("change", (event) => {
-        const entry = quantView && state.quant.rois[quantView.row.rowKey];
-        if (entry) { entry.polarity = event.target.value === "bright" ? "bright" : "dark"; entry.confirmed = false; invalidateQuantResults(); invalidateExposureReport(); markDirty(); }
+        const keys = quantNormalizationMode() === "paired-band" ? [state.quant.numeratorKey, state.quant.denominatorKey] : [quantView?.row?.rowKey];
+        const nextPolarity = event.target.value === "bright" ? "bright" : "dark";
+        let changed = false;
+        keys.filter(Boolean).forEach((key) => {
+          const entry = state.quant.rois[key];
+          if (entry && entry.polarity !== nextPolarity) {
+            entry.polarity = nextPolarity;
+            entry.confirmed = false;
+            changed = true;
+          }
+        });
+        if (changed) {
+          invalidateQuantResults();
+          invalidateExposureReport();
+          markDirty();
+        }
+        paintQuantCanvas();
       });
       $("#quantMembrane").addEventListener("input", (event) => {
         if (!quantView) return;
@@ -5012,6 +5270,8 @@
       $("#quantRoiType").addEventListener("change", paintQuantCanvas);
       $("#initializeRois").addEventListener("click", initializeQuantRois);
       $("#suggestRois").addEventListener("click", suggestQuantRois);
+      $("#guideRois").addEventListener("click", startQuantGuide);
+      $("#createCleavagePair").addEventListener("click", createCleavagePair);
       $("#calculateQuant").addEventListener("click", calculateQuantification);
       $("#exportQuantCsv").addEventListener("click", exportQuantCsv);
       $("#exportQuantXlsx").addEventListener("click", exportQuantXlsx);
@@ -5042,24 +5302,34 @@
       $("#exposureTimeUnit").addEventListener("change", invalidateExposureReport);
 
       $("#quantCanvas").addEventListener("pointerdown", (event) => {
-        const roi = selectedQuantRoi();
-        if (!roi || !quantView) return;
+        if (!quantView) return;
         const rect = event.currentTarget.getBoundingClientRect();
         const x = (event.clientX - rect.left) * event.currentTarget.width / rect.width / quantView.scale;
         const y = (event.clientY - rect.top) * event.currentTarget.height / rect.height / quantView.scale;
+        if (quantGuide?.active) {
+          quantGuide.pointerId = event.pointerId;
+          quantGuide.y = Math.max(0, Math.min(quantView.decoded.height, y));
+          event.currentTarget.setPointerCapture(event.pointerId);
+          paintQuantCanvas();
+          return;
+        }
+        const hit = hitQuantRoi(x, y);
+        if (!hit) return;
+        $("#quantLane").value = String(hit.laneIndex);
+        $("#quantRoiType").value = hit.type;
+        const roi = hit.roi;
         quantDrag = { pointerId: event.pointerId, dx: x - roi.x, dy: y - roi.y, start: { ...roi } };
         event.currentTarget.setPointerCapture(event.pointerId);
-        if (!(x >= roi.x && x <= roi.x + roi.w && y >= roi.y && y <= roi.y + roi.h)) {
-          roi.x = x - roi.w / 2;
-          roi.y = y - roi.h / 2;
-          quantDrag.dx = roi.w / 2;
-          quantDrag.dy = roi.h / 2;
-          clampQuantRoi(roi);
-          markQuantRoiAdjusted(state.quant.rois[quantView.row.rowKey]);
-          paintQuantCanvas();
-        }
+        paintQuantCanvas();
       });
       $("#quantCanvas").addEventListener("pointermove", (event) => {
+        if (quantGuide?.active && quantGuide.pointerId === event.pointerId) {
+          const rect = event.currentTarget.getBoundingClientRect();
+          const y = (event.clientY - rect.top) * event.currentTarget.height / rect.height / quantView.scale;
+          quantGuide.y = Math.max(0, Math.min(quantView.decoded.height, y));
+          paintQuantCanvas();
+          return;
+        }
         if (!quantDrag || quantDrag.pointerId !== event.pointerId) return;
         const roi = selectedQuantRoi();
         const rect = event.currentTarget.getBoundingClientRect();
@@ -5072,13 +5342,23 @@
         paintQuantCanvas();
       });
       const finishQuantDrag = (event) => {
+        if (quantGuide?.active && quantGuide.pointerId === event.pointerId) {
+          const y = quantGuide.y;
+          quantGuide = null;
+          applyQuantGuide(y);
+          return;
+        }
         if (!quantDrag || quantDrag.pointerId !== event.pointerId) return;
         quantDrag = null;
         markDirty();
       };
       $("#quantCanvas").addEventListener("pointerup", finishQuantDrag);
-      $("#quantCanvas").addEventListener("pointercancel", finishQuantDrag);
+      $("#quantCanvas").addEventListener("pointercancel", (event) => {
+        if (quantGuide?.pointerId === event.pointerId) { quantGuide = null; paintQuantCanvas(); }
+        if (quantDrag?.pointerId === event.pointerId) quantDrag = null;
+      });
       $("#quantCanvas").addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && quantGuide) { event.preventDefault(); quantGuide = null; paintQuantCanvas(); return; }
         const step = event.shiftKey ? 10 : 1;
         if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "[", "]"].includes(event.key)) event.preventDefault();
         if (event.key === "ArrowLeft") moveQuantRoi(-step, 0);

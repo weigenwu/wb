@@ -5,7 +5,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { chromium } = require("playwright");
 
-function grayTiff(width, height, laneValues) {
+function grayTiff(width, height, laneValues, bands = [{ y1: 62, y2: 84, values: laneValues }]) {
   const entries = 11;
   const ifdOffset = 8;
   const ifdEnd = ifdOffset + 2 + entries * 12 + 4;
@@ -37,12 +37,14 @@ function grayTiff(width, height, laneValues) {
   entry(339, 3, 1, 1);
   buffer.writeUInt32LE(0, cursor);
   const laneWidth = width / laneValues.length;
-  laneValues.forEach((value, lane) => {
-    for (let y = 62; y < 84; y += 1) {
-      for (let x = Math.floor(lane * laneWidth + 16); x < Math.floor((lane + 1) * laneWidth - 16); x += 1) {
-        buffer[pixelOffset + y * width + x] = value;
+  bands.forEach(({ y1, y2, values }) => {
+    values.forEach((value, lane) => {
+      for (let y = y1; y < y2; y += 1) {
+        for (let x = Math.floor(lane * laneWidth + 16); x < Math.floor((lane + 1) * laneWidth - 16); x += 1) {
+          buffer[pixelOffset + y * width + x] = value;
+        }
       }
-    }
+    });
   });
   return buffer;
 }
@@ -61,11 +63,16 @@ async function waitForServer(url) {
   const target = path.join(fixtureDir, "Target_Protein.tif");
   const exposureShort = path.join(fixtureDir, "Loading_short.tif");
   const exposureLong = path.join(fixtureDir, "Loading_long.tif");
+  const cleavage = path.join(fixtureDir, "GSDMB_cleavage.tif");
   const loadingBytes = grayTiff(300, 100, [120, 120, 120]);
   fs.writeFileSync(loading, loadingBytes);
   fs.writeFileSync(target, grayTiff(300, 100, [80, 160, 240]));
   fs.writeFileSync(exposureShort, grayTiff(300, 100, [70, 70, 70]));
   fs.writeFileSync(exposureLong, grayTiff(300, 100, [220, 220, 220]));
+  fs.writeFileSync(cleavage, grayTiff(300, 120, [90, 140, 190], [
+    { y1: 22, y2: 36, values: [90, 140, 190] },
+    { y1: 76, y2: 90, values: [180, 150, 120] },
+  ]));
   const legacyProject = path.join(fixtureDir, "legacy-v1.wb-project");
   fs.writeFileSync(legacyProject, JSON.stringify({
     kind: "blotboard-project",
@@ -354,7 +361,7 @@ async function waitForServer(url) {
     assert.match(projectFile.suggestedFilename(), /project\.wb-project$/);
     const projectPath = await projectFile.path();
     const project = JSON.parse(fs.readFileSync(projectPath, "utf8"));
-    assert.equal(project.version, 4);
+    assert.equal(project.version, 5);
     assert.equal(project.settings.showGroupBrackets, false);
     assert.equal(project.rows.length, 2);
     assert.equal(project.rows[1].backgroundClean, 60);
@@ -381,6 +388,95 @@ async function waitForServer(url) {
     await page.locator("#openPanels").click();
     assert.equal(await page.locator("#panelGrid .panel-card").count(), 2);
     await page.locator('[data-close-dialog="panelDialog"]').click();
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#newProject").click();
+    await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 0);
+    await page.locator("#multiFile").setInputFiles(cleavage);
+    await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 1);
+    await page.locator("#rowList .protein-row-top input").first().fill("GSDMB");
+    await page.locator("#openQuant").click();
+    await page.locator("#quantDialog").waitFor({ state: "visible" });
+    await page.locator("#quantNormalizationMode").selectOption("paired-band");
+    await page.locator("#createCleavagePair").waitFor({ state: "visible" });
+    assert.ok(await page.locator("#quantLoadingField").isHidden());
+    await page.locator("#createCleavagePair").click();
+    await page.waitForFunction(() => document.querySelector("#toast")?.textContent.includes("已用同一原始 TIFF 建立")
+      && document.querySelectorAll("#rowList .protein-row").length === 2
+      && document.querySelectorAll("#quantRow option").length === 2);
+    const cleavageRows = page.locator("#rowList .protein-row");
+    assert.deepEqual([
+      await cleavageRows.nth(0).locator(".protein-row-top input").first().inputValue(),
+      await cleavageRows.nth(1).locator(".protein-row-top input").first().inputValue(),
+    ], ["GSDMB-N", "GSDMB-FL"]);
+    const cleavageNumeratorKey = await page.locator("#quantNumerator").inputValue();
+    const cleavageDenominatorKey = await page.locator("#quantDenominator").inputValue();
+    assert.ok(cleavageNumeratorKey && cleavageDenominatorKey && cleavageNumeratorKey !== cleavageDenominatorKey);
+
+    const placeGuide = async (bandCenterY) => {
+      const canvas = page.locator("#quantCanvas");
+      const box = await canvas.boundingBox();
+      assert.ok(box, "quantification canvas must be visible for horizontal guide placement");
+      await page.locator("#guideRois").click();
+      await page.mouse.move(box.x + box.width / 2, box.y + 10);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2, box.y + bandCenterY);
+      await page.mouse.up();
+      await page.waitForFunction(() => document.querySelector("#quantStatus")?.textContent.includes("横线定位 3 条泳道"));
+    };
+
+    await page.locator("#quantPolarity").selectOption("bright");
+    await page.locator("#quantRoiHeight").fill("12");
+    await placeGuide(29);
+    await page.locator("#quantMapLocked").check();
+    assert.ok(await page.locator('#sampleMapBody [data-map="sampleId"]').first().isDisabled());
+    await page.locator("#calculateQuant").click();
+    await page.waitForFunction((key) => document.querySelector("#quantRow")?.value === key
+      && document.querySelector("#quantStatus")?.textContent.includes("请先按泳道等宽初始化"), cleavageDenominatorKey);
+    await page.locator("#quantPolarity").selectOption("bright");
+    await page.locator("#quantRoiHeight").fill("12");
+    await placeGuide(83);
+    await page.locator("#calculateQuant").click();
+    try {
+      await page.waitForFunction(() => document.querySelectorAll("#quantResults tbody tr").length === 3, null, { timeout: 10_000 });
+    } catch (error) {
+      console.error(`cleavage status: ${await page.locator("#quantStatus").textContent()}\ntoast: ${await page.locator("#toast").textContent()}\nresults: ${await page.locator("#quantResults").innerText()}\nconsole: ${errors.join(" | ")}`);
+      throw error;
+    }
+    assert.match(await page.locator("#quantResults thead").textContent(), /N IntDen.*FL IntDen.*N\/FL.*相对对照 Fold/);
+    const cleavageRatios = await page.locator("#quantResults tbody tr td:nth-child(9)").allTextContents();
+    assert.ok(cleavageRatios.every((value) => Number.isFinite(Number(value)) && Number(value) > 0), "every included lane must have a finite positive N/FL ratio");
+
+    const cleavageCsvDownload = page.waitForEvent("download");
+    await page.locator("#exportQuantCsv").click();
+    const cleavageCsv = fs.readFileSync(await (await cleavageCsvDownload).path(), "utf8");
+    assert.match(cleavageCsv, /"metric","ratio_formula"/);
+    assert.match(cleavageCsv, /,"N\/FL",/);
+    assert.match(cleavageCsv, /"manual-row-line-v1","manual-row-line-v1"/);
+
+    await page.locator('[data-close-dialog="quantDialog"]').click();
+    const cleavageProjectDownload = page.waitForEvent("download");
+    await page.locator("#saveProject").click();
+    const cleavageProject = JSON.parse(fs.readFileSync(await (await cleavageProjectDownload).path(), "utf8"));
+    assert.equal(cleavageProject.version, 5);
+    assert.equal(cleavageProject.settings.quant.normalizationMode, "paired-band");
+    assert.equal(cleavageProject.settings.quant.rois[cleavageNumeratorKey].polarity, "bright");
+    assert.equal(cleavageProject.settings.quant.rois[cleavageDenominatorKey].polarity, "bright");
+    assert.equal(cleavageProject.settings.quant.rois[cleavageNumeratorKey].method, "manual-row-line-v1");
+    assert.equal(cleavageProject.settings.quant.rois[cleavageDenominatorKey].method, "manual-row-line-v1");
+    assert.equal(cleavageProject.rows[0].source.sha256, cleavageProject.rows[1].source.sha256, "N and FL must retain the same source TIFF identity");
+
+    await page.locator("#openQuant").click();
+    await page.locator("#quantDialog").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#quantNormalizationMode").inputValue(), "paired-band");
+    await page.locator("#quantNormalizationMode").selectOption("loading");
+    assert.ok(await page.locator("#quantLoadingField").isVisible());
+    assert.ok(await page.locator("#quantNumeratorField").isHidden());
+    assert.ok(await page.locator("#quantDenominatorField").isHidden());
+    assert.ok(await page.locator("#createCleavagePair").isHidden());
+    assert.equal(await page.locator("#calculateQuant").textContent(), "确认当前 ROI 并计算");
+    await page.locator('[data-close-dialog="quantDialog"]').click();
+
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`http://127.0.0.1:${port}/#studio`, { waitUntil: "networkidle" });
     assert.equal(await page.locator(".suite-nav .tool-tab").count(), 3);
@@ -406,7 +502,7 @@ async function waitForServer(url) {
     assert.ok(mobileShell.studioVisible, "#studio must land below the sticky header and inside the viewport");
     if (process.env.E2E_SCREENSHOT) await page.screenshot({ path: process.env.E2E_SCREENSHOT, fullPage: true });
     assert.deepEqual(errors, []);
-    console.log("WB browser E2E passed: sample-map import, assisted ROI, exposure QC, TIFF quantification, Prism and compliance package.");
+    console.log("WB browser E2E passed: sample-map import, assisted/line-guide ROI, loading and paired-band N/FL quantification, Prism and compliance package.");
   } finally {
     if (browser) await browser.close();
     server.kill();
