@@ -428,6 +428,12 @@ async function waitForServer(url) {
     await page.locator("#quantPolarity").selectOption("bright");
     await page.locator("#quantRoiHeight").fill("12");
     await placeGuide(29);
+    const roiOverlay = await page.locator("#quantCanvas").evaluate((canvas) => canvas.toDataURL());
+    await page.locator("#guideRois").click();
+    const clearGuideView = await page.locator("#quantCanvas").evaluate((canvas) => canvas.toDataURL());
+    assert.notEqual(clearGuideView, roiOverlay, "line-guide mode must hide old ROI boxes and lane-number labels");
+    await page.locator("#quantCanvas").press("Escape");
+    assert.equal(await page.locator("#quantCanvas").evaluate((canvas) => canvas.toDataURL()), roiOverlay, "cancelling the guide must restore the existing ROI overlay");
     await page.locator("#quantMapLocked").check();
     assert.ok(await page.locator('#sampleMapBody [data-map="sampleId"]').first().isDisabled());
     await page.locator("#calculateQuant").click();
