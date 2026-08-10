@@ -218,7 +218,9 @@ function testDarkAndBrightRois() {
   });
   assert.equal(dark.bandMean, 25);
   assert.equal(dark.backgroundMean, 200);
+  assert.equal(dark.fijiIntDen, 4 * 255 - (20 + 30 + 20 + 30), "dark Fiji/JAR compatibility IntDen is the inverted band sum before background subtraction");
   assert.equal(dark.corrected, 700);
+  assert.notEqual(dark.fijiIntDen, dark.corrected, "Fiji/JAR compatibility IntDen must remain uncorrected for background");
   assert.deepEqual(dark.qc, []);
 
   const bright = core.quantifyRoiPair({
@@ -231,7 +233,9 @@ function testDarkAndBrightRois() {
   });
   assert.equal(bright.bandMean, 235);
   assert.equal(bright.backgroundMean, 20);
+  assert.equal(bright.fijiIntDen, 230 + 240 + 230 + 240, "bright Fiji/JAR compatibility IntDen is the raw band sum before background subtraction");
   assert.equal(bright.corrected, 860);
+  assert.notEqual(bright.fijiIntDen, bright.corrected, "Fiji/JAR compatibility IntDen must remain uncorrected for background");
   assert.deepEqual(bright.qc, []);
 
   const saturated = core.quantifyRoiPair({
@@ -325,6 +329,79 @@ function testNormalizationAndPrism() {
   ]);
 }
 
+function testOrdinaryAnovaDunnett() {
+  const result = core.ordinaryAnovaDunnett([
+    { name: "control", values: [.682295422, .693432712, .905426369] },
+    { name: "sh1", values: [.119780948, .161386194, .213168795] },
+    { name: "sh2", values: [.124205847, .172884828, .177363983] },
+  ], "control");
+  assert.equal(result.df, 6);
+  assert.ok(Math.abs(result.mse - .006288999278774584) < 1e-15);
+  assert.deepEqual(result.groups.map(({ name, n }) => ({ name, n })), [
+    { name: "control", n: 3 }, { name: "sh1", n: 3 }, { name: "sh2", n: 3 },
+  ]);
+  assert.ok(Math.abs(result.groups[0].mean - .7603848343333333) < 1e-15);
+  assert.ok(Math.abs(result.groups[0].sd - .12573303023065344) < 1e-15);
+  assert.ok(Math.abs(result.comparisons[0].t - 9.1984374342) < 1e-10);
+  assert.ok(Math.abs(result.comparisons[1].t - 9.3007850953) < 1e-10);
+  assert.ok(Math.abs(result.comparisons[0].pAdjusted - .0001691208931) < 2e-8);
+  assert.ok(Math.abs(result.comparisons[1].pAdjusted - .0001588807922) < 2e-8);
+  result.comparisons.forEach(({ pAdjusted }) => assert.ok(pAdjusted >= 0 && pAdjusted <= 1));
+
+  const oneComparison = core.ordinaryAnovaDunnett([
+    { name: "control", values: [1, 2, 3] },
+    { name: "treatment", values: [2, 3, 4] },
+  ], "control");
+  const exactTwoSidedStudentT = 1 - 1.5 * Math.sqrt(3 / 11) + .5 * Math.sqrt(3 / 11) ** 3;
+  assert.ok(Math.abs(oneComparison.comparisons[0].pAdjusted - exactTwoSidedStudentT) < 1e-12, "one Dunnett comparison must equal the two-sided Student t test");
+  const lowDf = core.ordinaryAnovaDunnett([
+    { name: "control", values: [0, 1] },
+    { name: "treatment", values: [1, 2] },
+  ], "control");
+  assert.ok(Math.abs(lowDf.comparisons[0].pAdjusted - (1 - 1 / Math.sqrt(2))) < 1e-12, "the exact Student t branch must remain accurate at df=2");
+
+  const noDifference = core.ordinaryAnovaDunnett([
+    { name: "control", values: [1, 2, 3] },
+    { name: "same", values: [1, 2, 3] },
+  ], "control");
+  assert.equal(noDifference.comparisons[0].t, 0);
+  assert.equal(noDifference.comparisons[0].pAdjusted, 1);
+
+  const zeroMse = core.ordinaryAnovaDunnett([
+    { name: "control", values: [1, 1] },
+    { name: "same", values: [1, 1] },
+    { name: "different", values: [2, 2] },
+  ], "control");
+  assert.deepEqual(zeroMse.comparisons.map(({ t, pAdjusted }) => ({ t, pAdjusted })), [
+    { t: 0, pAdjusted: 1 }, { t: -Infinity, pAdjusted: 0 },
+  ]);
+  assert.throws(() => core.ordinaryAnovaDunnett([{ name: "only", values: [1, 2] }], "only"), /at least two groups/);
+  assert.throws(() => core.ordinaryAnovaDunnett([{ name: "a", values: [1, 2] }, { name: "b", values: [3] }], "a"), /at least two biological replicates/);
+  assert.throws(() => core.ordinaryAnovaDunnett([{ name: "a", values: [1, 2] }, { name: "b", values: [3, NaN] }], "a"), /non-finite/);
+  assert.throws(() => core.ordinaryAnovaDunnett([{ name: "a", values: [1, 2] }, { name: "b", values: [3, 4] }], "missing"), /was not found/);
+}
+
+function testPrismPlotGeometry() {
+  assert.deepEqual(core.prismPlotGeometry(3), {
+    logicalWidth: 205.44, logicalHeight: 273.6, plotLeft: 65.04, plotTop: 80.64, plotWidth: 106.19999999999999, plotHeight: 144, barWidth: 21.12, rotateGroupLabels: false,
+  });
+  const six = core.prismPlotGeometry(6);
+  assert.ok(Math.abs(six.logicalWidth - 211.32) < 1e-12);
+  assert.equal(six.logicalHeight, 268.8);
+  assert.equal(six.plotTop, 41.88);
+  assert.equal(six.plotWidth, 144);
+  assert.ok(Math.abs(six.barWidth - 15.157894736842104) < 1e-12);
+  assert.equal(six.rotateGroupLabels, true);
+  const ten = core.prismPlotGeometry(10);
+  assert.ok(Math.abs(ten.logicalWidth - 284.28) < 1e-12);
+  assert.equal(ten.plotWidth, 216);
+  assert.ok(Math.abs(ten.barWidth - 13.935483870967742) < 1e-12);
+  assert.deepEqual(core.prismPlotColors(3), ["#3f69a9", "#d96025", "#e69d21"]);
+  assert.deepEqual(core.prismPlotColors(6), ["#3f69a9", "#3f69a9", "#3f69a9", "#3f69a9", "#d96025", "#e69d21"]);
+  assert.deepEqual(core.prismPlotColors(10), [...Array(9).fill("#3f69a9"), "#d96025"]);
+  assert.throws(() => core.prismPlotGeometry(0), /integer from 1 to 24/);
+}
+
 function testQc() {
   const result = core.runIntegrityChecks({
     laneCount: 3,
@@ -356,6 +433,7 @@ function testQc() {
 
 function testPwaShell() {
   const root = path.join(__dirname, "..");
+  assert.equal(core.ENGINE_VERSION, "2.4.0");
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.webmanifest"), "utf8"));
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   assert.equal(manifest.name, "实验室工作台 · WB 组图与灰度");
@@ -366,8 +444,11 @@ function testPwaShell() {
   assert.match(html, /navigator\.serviceWorker\.register\("\.\/sw\.js"\)/);
   const worker = fs.readFileSync(path.join(root, "sw.js"), "utf8");
   assert.ok(worker.includes("./wb-core.js"));
-  assert.ok(worker.includes("figurelab-wb-v2.2.2"));
-  ["sampleMapText", "suggestRois", "exposureCheck", "downloadExposureReport", "editBackgroundClean", "editRotation", "autoStraighten"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
+  assert.ok(worker.includes("figurelab-wb-v2.4.0"));
+  ["sampleMapText", "quantRoiHeight", "suggestRois", "exposureCheck", "downloadExposureReport", "quantPlotTarget", "exportQuantPlotPng", "editBackgroundClean", "editRotation", "autoStraighten"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
+  assert.match(html, /ordinaryAnovaDunnett\(groups, state\.quant\.controlGroup\)/);
+  assert.match(html, /✱✱✱/);
+  assert.match(html, /Segoe UI Symbol/);
 }
 
 function testUnifiedSuiteShell() {
@@ -396,6 +477,8 @@ function testUnifiedSuiteShell() {
   testDisplayBackgroundFlattening,
   testAutomaticStripRotation,
   testNormalizationAndPrism,
+  testOrdinaryAnovaDunnett,
+  testPrismPlotGeometry,
   testQc,
   testPwaShell,
   testUnifiedSuiteShell,

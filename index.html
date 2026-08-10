@@ -437,7 +437,15 @@
     .results-table table { width: 100%; border-collapse: collapse; font-size: 10px; }
     .results-table th, .results-table td { padding: 6px; border-bottom: 1px solid var(--line); white-space: nowrap; text-align: right; }
     .results-table th:first-child, .results-table td:first-child { text-align: left; }
-    #quantPlot { width: 100%; max-height: 300px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+    .quant-plot-card { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #fbfcfe; }
+    .quant-plot-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+    .quant-plot-head h3 { margin: 0; font-size: 14px; }
+    .quant-plot-head p { max-width: 620px; margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .quant-plot-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+    .quant-plot-toolbar label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 750; }
+    .quant-plot-toolbar select { min-width: 150px; min-height: 38px; }
+    .quant-plot-loading { min-height: 38px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; font-size: 11px; }
+    #quantPlot { display: block; width: min(100%, 428px); height: auto; margin: auto; border-radius: 4px; background: #fff; box-shadow: 0 4px 18px rgba(20, 32, 51, .08); }
     .panel-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .panel-card { position: relative; min-height: 180px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: #f8faff; }
     .panel-card img { display: block; width: 100%; height: 150px; object-fit: contain; background: #fff; }
@@ -676,7 +684,7 @@
               </div>
               <div class="project-actions">
                 <button class="button small primary" id="openPreflight" type="button">投稿检查</button>
-                <button class="button small" id="openQuant" type="button">灰度定量</button>
+                <button class="button small" id="openQuant" type="button" title="从原始 8-bit TIFF 计算 IntDen、背景校正、内参归一化和 Fold change">WB 灰度定量</button>
                 <button class="button small" id="openPanels" type="button">多面板排版</button>
                 <button class="button small" id="exportPackage" type="button">投稿合规包</button>
                 <button class="button small" id="newProject" type="button">新建图组</button>
@@ -752,12 +760,13 @@
     <div class="dialog-head"><div><h2 id="quantTitle">WB 灰度定量</h2><p>仅使用 8-bit 单通道原始 TIFF；先确认样本映射和 ROI，再从原始像素重算。</p></div><button class="icon-button" data-close-dialog="quantDialog" type="button" aria-label="关闭">✕</button></div>
     <div class="science-body">
       <div class="science-toolbar">
-        <label>当前蛋白<select id="quantRow"></select></label>
-        <label>内参<select id="quantLoading"></select></label>
+        <label>ROI 条带行<select id="quantRow"></select></label>
+        <label>定量内参<select id="quantLoading"></select></label>
         <label>控制组<select id="quantControlGroup"></select></label>
         <label>条带极性<select id="quantPolarity"><option value="dark">暗带 / 亮背景</option><option value="bright">亮带 / 暗背景</option></select></label>
         <label>膜编号<input id="quantMembrane" type="text" maxlength="40" placeholder="例如 membrane-1"></label>
-        <button class="button small" id="initializeRois" type="button">等距初始化 ROI</button>
+        <label>ROI 高度（px）<input id="quantRoiHeight" type="number" min="2" step="1" inputmode="numeric" aria-label="条带与背景 ROI 高度，单位像素"></label>
+        <button class="button small" id="initializeRois" type="button">按泳道等宽初始化</button>
         <button class="button small" id="suggestRois" type="button">信号建议 ROI</button>
         <button class="button small primary" id="calculateQuant" type="button">确认当前 ROI 并计算</button>
       </div>
@@ -767,6 +776,7 @@
           <strong>ROI 操作</strong>
           <p class="field-help">黄色：条带 ROI；蓝色：同尺寸局部背景。点击 ROI 后拖动；方向键微调，Shift 为 10 px。</p>
           <p class="field-help">信号建议只分析当前裁剪区域，并按已设置的泳道数定位；请先排除 Marker 和无关泳道。</p>
+          <p class="field-help"><strong>Fiji/JAR 对照：</strong>结果中的 IntDen 是按条带极性换算后的 ROI 像素和，未扣除背景；正式归一化仍使用局部背景校正灰度。</p>
           <label>泳道<select id="quantLane"></select></label>
           <label>当前框<select id="quantRoiType"><option value="band">条带 ROI</option><option value="background">背景 ROI</option></select></label>
           <label class="toggle"><input id="quantMapLocked" type="checkbox"> 锁定已核对的样本映射</label>
@@ -793,7 +803,18 @@
         <p class="field-help">该检查是固定阈值的 QC 启发式，不能替代成像系统的线性范围验证。本次加入的曝光文件不会写入项目，请下载检查报告留档。</p>
       </details>
       <div id="quantResults" class="results-table"></div>
-      <canvas id="quantPlot" width="1000" height="420" aria-label="灰度定量结果图"></canvas>
+      <section class="quant-plot-card" aria-labelledby="quantPlotTitle">
+        <div class="quant-plot-head">
+          <div><h3 id="quantPlotTitle">Prism 风格绘图</h3><p>默认沿用你的 Prism 项目参数：Arial、白底及蓝/橙/黄重点配色，多组时自动加宽并旋转标签；目的/内参按生物学重复绘制均值柱、SD 与全部独立点。两组使用双侧非配对 Student t 检验（等方差）；三组及以上使用 ordinary one-way ANOVA + Dunnett（控制组 vs 其它组）。</p></div>
+          <div class="quant-plot-toolbar">
+            <label>绘图目的蛋白<select id="quantPlotTarget"></select></label>
+            <div class="quant-plot-loading">绘图内参：<strong id="quantPlotLoadingName">—</strong></div>
+            <button class="button small primary" id="exportQuantPlotPng" type="button">导出 300 DPI PNG</button>
+          </div>
+        </div>
+        <p id="quantPlotStatus" class="field-help" aria-live="polite">完成灰度定量后自动绘图。</p>
+        <canvas id="quantPlot" width="856" height="1140" aria-label="Prism 风格 WB 灰度定量结果图"></canvas>
+      </section>
     </div>
     <div class="dialog-foot"><p>归一化仅允许目的蛋白与内参膜编号一致；结果同时保留原始 ROI、背景扣除、QC 和 SHA-256。</p><div class="dialog-actions"><button class="button small" id="exportQuantCsv" type="button">明细 CSV</button><button class="button small" id="exportQuantXlsx" type="button">完整 XLSX</button><button class="button small primary" id="exportPrism" type="button">Prism 数据包</button></div></div>
   </dialog>
@@ -1523,7 +1544,7 @@
           name.value = row.name;
           name.maxLength = 40;
           name.setAttribute("aria-label", `第 ${index + 1} 行蛋白名称`);
-          name.addEventListener("input", () => { row.name = name.value; state.demoLoaded = false; markDirty(); requestRender(); });
+          name.addEventListener("input", () => { row.name = name.value; state.demoLoaded = false; invalidateQuantResults(); markDirty(); requestRender(); });
           const mw = document.createElement("input");
           mw.type = "text";
           mw.value = row.mw;
@@ -1544,7 +1565,7 @@
             row.role = role.value;
             if (row.role === "loading") state.quant.loadingKey = row.rowKey;
             else if (state.quant.loadingKey === row.rowKey) state.quant.loadingKey = state.rows.find((item) => item.role === "loading" && item.rowKey !== row.rowKey)?.rowKey || "";
-            state.quant.results = null;
+            invalidateQuantResults();
             markDirty();
           });
           roleLabel.append(role);
@@ -1555,7 +1576,7 @@
           membrane.maxLength = 40;
           membrane.placeholder = "例如 membrane-1";
           membrane.value = row.membraneId || "";
-          membrane.addEventListener("input", () => { row.membraneId = membrane.value.trim(); state.quant.results = null; markDirty(); });
+          membrane.addEventListener("input", () => { row.membraneId = membrane.value.trim(); invalidateQuantResults(); markDirty(); });
           membraneLabel.append(membrane);
           const spliceLabel = document.createElement("label");
           spliceLabel.className = "wide";
@@ -1618,7 +1639,7 @@
         delete state.quant.rois[row.rowKey];
         if (exposureCheck.rowKey === row.rowKey) { quantView = null; resetExposureCheck(); }
         if (state.quant.loadingKey === row.rowKey) state.quant.loadingKey = "";
-        state.quant.results = null;
+        invalidateQuantResults();
         state.demoLoaded = false;
         markDirty();
         renderRows();
@@ -1652,7 +1673,7 @@
             state.rows[index] = replacement;
             delete state.quant.rois[replacement.rowKey];
             if (exposureCheck.rowKey === replacement.rowKey) { quantView = null; resetExposureCheck(); }
-            state.quant.results = null;
+            invalidateQuantResults();
             state.quant.locked = false;
             state.demoLoaded = false;
             markDirty();
@@ -2491,7 +2512,7 @@
         else if (groupsChanged) {
           if (state.quant.sampleMap.length === nextSequence.length) state.quant.sampleMap.forEach((sample, index) => { sample.group = nextSequence[index]; });
           state.quant.locked = false;
-          state.quant.results = null;
+          invalidateQuantResults();
           state.quant.controlGroup = uniqueGroupNames().includes(state.quant.controlGroup) ? state.quant.controlGroup : uniqueGroupNames()[0] || "";
           if ($("#quantMapLocked")) $("#quantMapLocked").checked = false;
           invalidateExposureReport();
@@ -2504,7 +2525,7 @@
         if (previousLaneCount !== totalSamples()) state.quant.rois = {};
         else Object.values(state.quant.rois || {}).forEach((entry) => { entry.confirmed = false; });
         state.quant.locked = false;
-        state.quant.results = null;
+        invalidateQuantResults();
         if ($("#quantMapLocked")) $("#quantMapLocked").checked = false;
         resetExposureCheck();
       }
@@ -2513,7 +2534,7 @@
         if (state.quant.sampleMap.length !== totalSamples()) {
           state.quant.sampleMap = defaultSampleMap();
           state.quant.locked = false;
-          state.quant.results = null;
+          invalidateQuantResults();
         }
         return state.quant.sampleMap;
       }
@@ -2585,7 +2606,7 @@
               const key = input.dataset.map;
               sample[key] = input.type === "checkbox" ? input.checked : input.value.trim();
               state.quant.locked = false;
-              state.quant.results = null;
+              invalidateQuantResults();
               $("#quantMapLocked").checked = false;
               invalidateExposureReport();
               if (key === "group") {
@@ -2719,12 +2740,18 @@
         try {
           const decoded = await decodeQuantRow(row);
           const entry = state.quant.rois[row.rowKey];
+          const crop = row.crop ? fitAspectCrop(row, row.crop) : { x: 0, y: 0, w: decoded.width, h: decoded.height };
+          const safeHeight = Math.max(2, Math.floor(crop.h * .36));
+          const defaultHeight = Math.max(2, Math.min(safeHeight, Math.round(crop.h * .22)));
+          const heightInput = $("#quantRoiHeight");
+          heightInput.max = String(Math.max(safeHeight, entry?.lanes?.[0]?.band?.h || 0));
+          heightInput.value = String(entry?.lanes?.[0]?.band?.h || defaultHeight);
           $("#quantPolarity").value = entry?.polarity || "dark";
           $("#quantMembrane").value = row.membraneId || "";
           quantView = { row, decoded };
           paintQuantCanvas();
-          const method = entry?.method?.startsWith("row-contrast") ? "信号建议" : entry ? "手动/等距" : "";
-          $("#quantStatus").textContent = entry ? `${entry.confirmed ? "已确认" : "待确认"} · ${entry.lanes.length} 条泳道 ROI · ${method}` : "请先等距初始化或生成信号建议 ROI。";
+          const method = entry?.method?.startsWith("row-contrast") ? "信号建议" : entry ? "手动/等宽" : "";
+          $("#quantStatus").textContent = entry ? `${entry.confirmed ? "已确认" : "待确认"} · ${entry.lanes.length} 条泳道 ROI · ${method}` : "请先按泳道等宽初始化或生成信号建议 ROI。";
           prepareExposureCheck(row);
         } catch (error) { toast(error.message); }
       }
@@ -2737,13 +2764,16 @@
         const crop = row.crop ? fitAspectCrop(row, row.crop) : { x: 0, y: 0, w: decoded.width, h: decoded.height };
         const laneWidth = crop.w / lanes;
         const boxWidth = Math.max(2, Math.round(laneWidth * .72));
-        const boxHeight = Math.max(2, Math.round(crop.h * .22));
+        const requestedHeight = Math.round(Number($("#quantRoiHeight").value));
+        const safeHeight = Math.max(2, Math.floor(crop.h * .36));
+        const boxHeight = Math.max(2, Math.min(safeHeight, Number.isFinite(requestedHeight) ? requestedHeight : Math.round(crop.h * .22)));
+        $("#quantRoiHeight").value = String(boxHeight);
         const yBackground = Math.round(crop.y + crop.h * .06);
         const yBand = Math.round(crop.y + crop.h * .62);
         state.quant.rois[row.rowKey] = {
           polarity: $("#quantPolarity").value === "bright" ? "bright" : "dark",
           confirmed: false,
-          method: "uniform-v1",
+          method: "uniform-v2",
           lanes: Array.from({ length: lanes }, (_, index) => {
             const x = Math.max(0, Math.min(decoded.width - boxWidth, Math.round(crop.x + index * laneWidth + (laneWidth - boxWidth) / 2)));
             return {
@@ -2752,11 +2782,11 @@
             };
           }),
         };
-        state.quant.results = null;
+        invalidateQuantResults();
         markDirty();
         invalidateExposureReport();
         paintQuantCanvas();
-        $("#quantStatus").textContent = "ROI 已初始化；请逐泳道核对条带框和局部背景框。";
+        $("#quantStatus").textContent = `已按泳道等宽初始化 ${boxHeight} px 高 ROI；请逐泳道核对条带框和局部背景框。`;
       }
 
       function suggestQuantRois() {
@@ -2774,7 +2804,7 @@
             method: suggestion.method,
             lanes: suggestion.lanes.map((lane) => ({ band: lane.band, background: lane.background })),
           };
-          state.quant.results = null;
+          invalidateQuantResults();
           markDirty();
           invalidateExposureReport();
           paintQuantCanvas();
@@ -2783,14 +2813,14 @@
             ? `已生成信号建议；第 ${review.join("、")} 道需重点核对，建议不会自动确认。`
             : "已生成信号建议；请逐泳道核对后再确认计算。";
         } catch (error) {
-          toast(`无法生成可靠建议：${error.message}；可使用等距初始化后手动调整`);
+          toast(`无法生成可靠建议：${error.message}；可按泳道等宽初始化后手动调整`);
         }
       }
 
       function markQuantRoiAdjusted(entry) {
         entry.method = entry.method?.startsWith("row-contrast") ? "row-contrast-v1+manual" : "manual";
         entry.confirmed = false;
-        state.quant.results = null;
+        invalidateQuantResults();
         invalidateExposureReport();
       }
 
@@ -2863,6 +2893,7 @@
           roi.y = cy - height / 2;
           clampQuantRoi(roi);
         }));
+        $("#quantRoiHeight").value = String(height);
         markQuantRoiAdjusted(entry);
         markDirty();
         paintQuantCanvas();
@@ -3121,103 +3152,328 @@
         const container = $("#quantResults");
         if (!results) {
           container.innerHTML = '<p class="field-help" style="padding:12px">尚未计算。</p>';
-          const plot = $("#quantPlot");
-          plot.getContext("2d").clearRect(0, 0, plot.width, plot.height);
+          syncQuantPlotTarget();
+          renderQuantPlot();
           return;
         }
         const rows = results.normalized;
-        container.innerHTML = `<table><thead><tr><th>目的蛋白</th><th>样本</th><th>组别</th><th>生物学重复</th><th>校正灰度</th><th>目的/内参</th><th>Fold</th><th>QC</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${xml(row.target)}</td><td>${xml(row.sampleId)}</td><td>${xml(row.group)}</td><td>${xml(row.biologicalReplicate)}</td><td>${Number(row.targetMeasurement.corrected).toFixed(3)}</td><td>${row.ratio === null ? "NA" : Number(row.ratio).toFixed(4)}</td><td>${row.foldChange === null ? "NA" : Number(row.foldChange).toFixed(4)}</td><td>${xml([...new Set(row.qc)].join("; "))}</td></tr>`).join("")}</tbody></table>`;
+        container.innerHTML = `<table><thead><tr><th>目的蛋白</th><th>样本</th><th>组别</th><th>生物学重复</th><th title="按当前条带极性换算的 ROI 像素和；未扣除背景，仅用于与 Fiji/JAR 核对">IntDen（Fiji 对照）</th><th>背景校正灰度</th><th>目的/内参</th><th>Fold</th><th>QC</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${xml(row.target)}</td><td>${xml(row.sampleId)}</td><td>${xml(row.group)}</td><td>${xml(row.biologicalReplicate)}</td><td>${Number(row.targetMeasurement.fijiIntDen).toFixed(3)}</td><td>${Number(row.targetMeasurement.corrected).toFixed(3)}</td><td>${row.ratio === null ? "NA" : Number(row.ratio).toFixed(4)}</td><td>${row.foldChange === null ? "NA" : Number(row.foldChange).toFixed(4)}</td><td>${xml([...new Set(row.qc)].join("; "))}</td></tr>`).join("")}</tbody></table>`;
+        syncQuantPlotTarget();
         renderQuantPlot();
+      }
+
+      function invalidateQuantResults() {
+        const hadResults = Boolean(state.quant.results);
+        state.quant.results = null;
+        if (hadResults && $("#quantDialog")?.open) renderQuantResults();
+      }
+
+      function quantPlotTargets() {
+        const results = state.quant.results;
+        if (!results) return [];
+        const targets = new Map();
+        results.normalized.forEach((row) => {
+          if (!targets.has(row.targetKey)) targets.set(row.targetKey, row.target);
+        });
+        return [...targets].map(([key, name]) => ({ key, name }));
+      }
+
+      function syncQuantPlotTarget() {
+        const select = $("#quantPlotTarget");
+        const previous = select.value;
+        const targets = quantPlotTargets();
+        select.replaceChildren(...targets.map((target) => {
+          const option = document.createElement("option");
+          option.value = target.key;
+          option.textContent = target.name;
+          return option;
+        }));
+        const preferred = targets.find((target) => target.key === previous)?.key
+          || targets.find((target) => target.key === $("#quantRow").value)?.key
+          || targets[0]?.key
+          || "";
+        select.value = preferred;
+        select.disabled = !targets.length;
+        $("#quantPlotLoadingName").textContent = state.quant.results?.loadingName || "—";
+        $("#exportQuantPlotPng").disabled = !targets.length;
+        return preferred;
+      }
+
+      function quantPlotModel(selectedKey = $("#quantPlotTarget").value) {
+        const results = state.quant.results;
+        if (!results || !selectedKey) return null;
+        const rows = results.normalized.filter((row) => row.targetKey === selectedKey && !row.excluded && Number.isFinite(row.biologicalRatio));
+        if (!rows.length) return null;
+        const orderedGroups = [...new Set([...uniqueGroupNames(), ...rows.map((row) => row.group)])];
+        const groups = orderedGroups.map((name) => {
+          const values = new Map();
+          rows.filter((row) => row.group === name).forEach((row) => values.set(String(row.biologicalReplicate), row.biologicalRatio));
+          return { name, values: [...values.values()] };
+        }).filter((group) => group.values.length);
+        if (!groups.length) return null;
+        let statistics = null;
+        let statisticsError = "";
+        try { statistics = window.WBCore.ordinaryAnovaDunnett(groups, state.quant.controlGroup); }
+        catch (error) { statisticsError = error.message; }
+        return {
+          targetKey: selectedKey,
+          targetName: rows[0].target,
+          loadingName: results.loadingName,
+          controlGroup: state.quant.controlGroup,
+          groups,
+          statistics,
+          statisticsError,
+        };
+      }
+
+      function niceAxis(maximum) {
+        const safeMaximum = Number.isFinite(maximum) && maximum > 0 ? maximum : 1;
+        const roughStep = safeMaximum / 5;
+        const power = 10 ** Math.floor(Math.log10(roughStep));
+        const normalized = roughStep / power;
+        const factor = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10;
+        const step = factor * power;
+        const maximumTick = Math.max(step, Math.ceil(safeMaximum * 1.04 / step) * step);
+        const decimals = Math.max(0, -Math.floor(Math.log10(step)) + (factor === 2.5 ? 1 : 0));
+        return { step, maximum: maximumTick, decimals: Math.min(6, decimals) };
+      }
+
+      function significanceStars(pValue) {
+        if (pValue < .0001) return "✱✱✱✱";
+        if (pValue < .001) return "✱✱✱";
+        if (pValue < .01) return "✱✱";
+        if (pValue < .05) return "✱";
+        return "";
+      }
+
+      function formatAdjustedP(value) {
+        if (!Number.isFinite(value)) return "NA";
+        if (value < .0001) return "<0.0001";
+        return value.toPrecision(3);
+      }
+
+      function fitCanvasText(ctx, text, maximumWidth, preferredSize, minimumSize = 7) {
+        let size = preferredSize;
+        while (size > minimumSize) {
+          ctx.font = `700 ${size}px Arial, sans-serif`;
+          if (ctx.measureText(text).width <= maximumWidth) break;
+          size -= .5;
+        }
+        size = Math.max(minimumSize, size);
+        ctx.font = `700 ${size}px Arial, sans-serif`;
+        return size;
       }
 
       function renderQuantPlot() {
         const canvas = $("#quantPlot");
         const ctx = canvas.getContext("2d");
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const model = quantPlotModel();
+        const groupCount = model?.groups.length || 0;
+        const plotGeometry = groupCount ? window.WBCore.prismPlotGeometry(groupCount) : null;
+        const referencePlotWidth = plotGeometry?.plotWidth || 35.4;
+        const logicalWidth = plotGeometry?.logicalWidth || 205.44;
+        const bracketOffset = plotGeometry?.rotateGroupLabels && model.statistics?.comparisons.some((comparison) => significanceStars(comparison.pAdjusted)) ? 38.76 : 0;
+        const logicalHeight = (plotGeometry?.logicalHeight || 273.6) + bracketOffset;
+        canvas.width = Math.round(logicalWidth / 72 * 300);
+        canvas.height = Math.round(logicalHeight / 72 * 300);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.fillStyle = "#fff";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        const results = state.quant.results;
-        if (!results) return;
-        const selectedKey = $("#quantRow").value;
-        const rows = results.normalized.filter((row) => row.targetKey === selectedKey && !row.excluded && row.foldChange !== null);
-        const groups = uniqueGroupNames().filter((group) => rows.some((row) => row.group === group));
-        if (!rows.length || !groups.length) return;
-        const values = rows.map((row) => row.foldChange);
-        const max = Math.max(1.2, ...values) * 1.15;
-        const margin = { left: 82, right: 32, top: 54, bottom: 86 };
-        const width = canvas.width - margin.left - margin.right;
-        const height = canvas.height - margin.top - margin.bottom;
-        ctx.strokeStyle = "#111827";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(margin.left, margin.top);
-        ctx.lineTo(margin.left, margin.top + height);
-        ctx.lineTo(margin.left + width, margin.top + height);
-        ctx.stroke();
-        ctx.font = "20px Arial, sans-serif";
-        ctx.fillStyle = "#111827";
-        ctx.textAlign = "center";
-        ctx.fillText(rows[0].target, margin.left + width / 2, 28);
-        ctx.save();
-        ctx.translate(24, margin.top + height / 2);
-        ctx.rotate(-Math.PI / 2);
-        ctx.fillText("Relative expression", 0, 0);
-        ctx.restore();
-        groups.forEach((group, groupIndex) => {
-          const groupRows = rows.filter((row) => row.group === group);
-          const unique = new Map(groupRows.map((row) => [String(row.biologicalReplicate), row.foldChange]));
-          const groupValues = [...unique.values()];
-          const x = margin.left + width * (groupIndex + .5) / groups.length;
-          groupValues.forEach((value, valueIndex) => {
-            const jitter = (valueIndex - (groupValues.length - 1) / 2) * 12;
-            const y = margin.top + height * (1 - value / max);
-            ctx.beginPath();
-            ctx.arc(x + jitter, y, 7, 0, Math.PI * 2);
-            ctx.fillStyle = "#2864e8";
-            ctx.fill();
-          });
-          const summary = results.summary.find((item) => item.targetKey === selectedKey && item.group === group);
-          if (summary?.mean !== null) {
-            const meanY = margin.top + height * (1 - summary.mean / max);
-            const sd = summary.sd || 0;
-            const top = margin.top + height * (1 - Math.min(max, summary.mean + sd) / max);
-            const bottom = margin.top + height * (1 - Math.max(0, summary.mean - sd) / max);
-            ctx.strokeStyle = "#111827";
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(x - 25, meanY); ctx.lineTo(x + 25, meanY);
-            ctx.moveTo(x, top); ctx.lineTo(x, bottom);
-            ctx.moveTo(x - 10, top); ctx.lineTo(x + 10, top);
-            ctx.moveTo(x - 10, bottom); ctx.lineTo(x + 10, bottom);
-            ctx.stroke();
-          }
-          ctx.fillStyle = "#111827";
-          ctx.font = "18px Arial, sans-serif";
+        const pointScale = 300 / 72;
+        ctx.scale(pointScale, pointScale);
+        const status = $("#quantPlotStatus");
+        if (!model) {
+          ctx.fillStyle = "#64748b";
+          ctx.font = "12px Arial, sans-serif";
           ctx.textAlign = "center";
-          ctx.fillText(group, x, margin.top + height + 35);
-        });
-        ctx.font = "15px Arial, sans-serif";
-        ctx.textAlign = "right";
-        for (let tick = 0; tick <= 4; tick += 1) {
-          const value = max * tick / 4;
-          const y = margin.top + height * (1 - tick / 4);
-          ctx.fillText(value.toFixed(1), margin.left - 12, y + 5);
+          ctx.fillText("完成灰度定量后自动绘图", 102.72, 136.8);
+          status.textContent = "完成灰度定量后自动绘图。";
+          return null;
         }
+        const colors = window.WBCore.prismPlotColors(model.groups.length);
+        const widePlot = plotGeometry.rotateGroupLabels;
+        ctx.font = "700 11px Arial, sans-serif";
+        const labelWidths = model.groups.map((group) => ctx.measureText(group.name).width);
+        const centerGapFraction = 3 / (3 * model.groups.length + 1);
+        const requiredPlotWidth = labelWidths.slice(1).reduce((width, labelWidth, index) => Math.max(width, ((labelWidths[index] + labelWidth) / 2 + 4) / centerGapFraction), referencePlotWidth);
+        const plot = { left: plotGeometry.plotLeft, top: plotGeometry.plotTop + bracketOffset, width: widePlot ? referencePlotWidth : Math.min(116.4, requiredPlotWidth), height: plotGeometry.plotHeight };
+        const bottom = plot.top + plot.height;
+        const summaryByName = new Map((model.statistics?.groups || model.groups.map((group) => {
+          const mean = group.values.reduce((sum, value) => sum + value, 0) / group.values.length;
+          const sd = group.values.length > 1 ? Math.sqrt(group.values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (group.values.length - 1)) : 0;
+          return { name: group.name, n: group.values.length, mean, sd };
+        })).map((group) => [group.name, group]));
+        const dataMaximum = Math.max(...model.groups.flatMap((group) => group.values), ...[...summaryByName.values()].map((group) => group.mean + (group.sd || 0)));
+        const axis = niceAxis(dataMaximum);
+        const yFor = (value) => bottom - Math.max(0, value) / axis.maximum * plot.height;
+        const centers = model.groups.map((group, index) => plot.left + plot.width * (3 * index + 2) / (3 * model.groups.length + 1));
+        const barWidth = plotGeometry.barWidth;
+        const centerGap = centers.length > 1 ? Math.min(...centers.slice(1).map((center, index) => center - centers[index])) : plot.width;
+        const pairScale = labelWidths.slice(1).reduce((scale, labelWidth, index) => Math.min(scale, (centerGap - 4) / ((labelWidths[index] + labelWidth) / 2)), 1);
+        const groupFontSize = widePlot ? 10.92 : Math.max(7, 11 * Math.min(1, pairScale));
+
+        ctx.fillStyle = "#000";
+        ctx.textAlign = "center";
+        fitCanvasText(ctx, model.targetName, plot.width + 18, 14, 9);
+        ctx.fillText(model.targetName, plot.left + plot.width / 2, 22, plot.width + 18);
+
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = 1.44;
+        ctx.beginPath();
+        ctx.moveTo(plot.left, plot.top);
+        ctx.lineTo(plot.left, bottom);
+        ctx.lineTo(plot.left + plot.width, bottom);
+        ctx.stroke();
+
+        ctx.font = "700 11px Arial, sans-serif";
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        for (let value = 0; value <= axis.maximum + axis.step / 2; value += axis.step) {
+          const y = yFor(value);
+          ctx.beginPath();
+          ctx.moveTo(plot.left - 6.12, y);
+          ctx.lineTo(plot.left, y);
+          ctx.stroke();
+          ctx.fillText(value.toFixed(axis.decimals), plot.left - 7.8, y);
+        }
+        centers.forEach((x) => {
+          ctx.beginPath();
+          ctx.moveTo(x, bottom);
+          ctx.lineTo(x, bottom + 6.12);
+          ctx.stroke();
+        });
+
+        model.groups.forEach((group, groupIndex) => {
+          const color = colors[groupIndex];
+          const x = centers[groupIndex];
+          const summary = summaryByName.get(group.name);
+          const meanY = yFor(summary.mean);
+          ctx.fillStyle = color;
+          ctx.strokeStyle = "#000";
+          ctx.lineWidth = 1.44;
+          ctx.beginPath();
+          ctx.rect(x - barWidth / 2, meanY, barWidth, bottom - meanY);
+          ctx.fill();
+          ctx.stroke();
+
+          const errorTop = yFor(summary.mean + (summary.sd || 0));
+          const errorBottom = yFor(Math.max(0, summary.mean - (summary.sd || 0)));
+          ctx.beginPath();
+          ctx.moveTo(x, errorTop);
+          ctx.lineTo(x, errorBottom);
+          ctx.moveTo(x - barWidth * .25, errorTop);
+          ctx.lineTo(x + barWidth * .25, errorTop);
+          ctx.moveTo(x - barWidth * .25, errorBottom);
+          ctx.lineTo(x + barWidth * .25, errorBottom);
+          ctx.stroke();
+
+          const points = group.values.map((value, valueIndex) => ({ value, valueIndex, y: yFor(value), offset: 0 })).sort((a, b) => a.y - b.y);
+          const clusters = [];
+          points.forEach((point) => {
+            const cluster = clusters.at(-1);
+            if (cluster && Math.abs(point.y - cluster.at(-1).y) < 5) cluster.push(point);
+            else clusters.push([point]);
+          });
+          clusters.forEach((cluster) => cluster.forEach((point, pointIndex) => { point.offset = (pointIndex - (cluster.length - 1) / 2) * 4.32; }));
+          points.sort((a, b) => a.valueIndex - b.valueIndex).forEach((point) => {
+            ctx.beginPath();
+            ctx.arc(x + point.offset, point.y, 2.16, 0, Math.PI * 2);
+            ctx.globalAlpha = .5;
+            ctx.fillStyle = color;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = "#000";
+            ctx.lineWidth = .72;
+            ctx.stroke();
+          });
+
+          ctx.fillStyle = "#000";
+          ctx.textBaseline = "alphabetic";
+          ctx.font = `700 ${groupFontSize}px Arial, sans-serif`;
+          if (widePlot) {
+            ctx.save();
+            ctx.translate(x, bottom + 25.2);
+            ctx.rotate(-Math.PI / 4);
+            ctx.textAlign = "center";
+            ctx.fillText(group.name, 0, 0);
+            ctx.restore();
+          } else {
+            ctx.textAlign = "center";
+            ctx.fillText(group.name, x, bottom + 17.64, Math.max(18, centerGap - 3));
+          }
+        });
+
+        ctx.save();
+        ctx.translate(27.16, plot.top + plot.height / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillStyle = "#000";
+        ctx.textAlign = "center";
+        fitCanvasText(ctx, "Relative protein expression", plot.height - 8, 12, 8);
+        ctx.fillText("Relative protein expression", 0, -6, plot.height - 8);
+        fitCanvasText(ctx, `(${model.loadingName} adjusted)`, plot.height - 8, 12, 8);
+        ctx.fillText(`(${model.loadingName} adjusted)`, 0, 8, plot.height - 8);
+        ctx.restore();
+
+        ctx.fillStyle = "#000";
+        ctx.textAlign = "center";
+        fitCanvasText(ctx, state.footerLabel || "", plot.width, 12, 8);
+        ctx.fillText(state.footerLabel || "", plot.left + plot.width / 2, widePlot ? 256.08 + bracketOffset : 260.88, plot.width);
+
+        const significant = (model.statistics?.comparisons || []).filter((comparison) => significanceStars(comparison.pAdjusted));
+        const displayedSignificant = significant.slice(0, 2);
+        const controlIndex = model.groups.findIndex((group) => group.name === model.controlGroup);
+        displayedSignificant.forEach((comparison, comparisonIndex) => {
+          const treatmentIndex = model.groups.findIndex((group) => group.name === comparison.group);
+          if (controlIndex < 0 || treatmentIndex < 0) return;
+          const y = plot.top - 3.36 - comparisonIndex * 26.88;
+          ctx.strokeStyle = "#000";
+          ctx.lineWidth = 1.44;
+          ctx.beginPath();
+          ctx.moveTo(centers[controlIndex], y + 8.52);
+          ctx.lineTo(centers[controlIndex], y);
+          ctx.lineTo(centers[treatmentIndex], y);
+          ctx.lineTo(centers[treatmentIndex], y + 8.52);
+          ctx.stroke();
+          ctx.fillStyle = "#000";
+          ctx.font = '9px "Segoe UI Symbol", Arial, sans-serif';
+          ctx.textAlign = "center";
+          ctx.fillText(significanceStars(comparison.pAdjusted), (centers[controlIndex] + centers[treatmentIndex]) / 2, y - 6.12);
+        });
+
+        const groupStatus = model.groups.map((group) => `${group.name} n=${group.values.length}`).join("；");
+        if (model.statistics) {
+          const method = model.groups.length === 2 ? "双侧非配对 Student t 检验（等方差）" : "ordinary one-way ANOVA + Dunnett";
+          const pLabel = model.groups.length === 2 ? "P" : "adjusted P";
+          const comparisons = model.statistics.comparisons.map((comparison) => `${comparison.controlGroup} vs ${comparison.group}: ${pLabel}=${formatAdjustedP(comparison.pAdjusted)}${significanceStars(comparison.pAdjusted) ? ` (${significanceStars(comparison.pAdjusted)})` : " (ns)"}`).join("；");
+          const omitted = significant.length > displayedSignificant.length ? ` 图中仅显示前 ${displayedSignificant.length} 条显著性括号；全部比较与 P 值见此处及 Plot_Stats。` : "";
+          status.textContent = `${model.targetName} / ${model.loadingName}；${groupStatus}。柱=均值，误差线=SD；${method}，df=${model.statistics.df}；${comparisons}。${omitted}`;
+        } else {
+          status.textContent = `${model.targetName} / ${model.loadingName}；${groupStatus}。已绘制均值、SD 和独立点；未运行统计检验：${model.statisticsError}`;
+        }
+        return model;
+      }
+
+      async function exportQuantPlotPng() {
+        const model = renderQuantPlot();
+        if (!model) return toast("请先完成灰度定量并选择目的蛋白");
+        const blob = await withPngDpi(await canvasBlob($("#quantPlot"), "image/png"), 300);
+        downloadBlob(blob, fileName("png", `quantification-${safeFilePart(model.targetName)}-prism-style-300dpi`));
+        toast("Prism 风格定量图已按 300 DPI 导出");
       }
 
       function quantDetailRows() {
         const results = state.quant.results;
         if (!results) return [];
-        return [["target", "lane", "sample_id", "group", "biological_replicate", "technical_replicate", "excluded", "exclusion_note", "target_roi_method", "loading_roi_method", "target_band_x", "target_band_y", "target_band_w", "target_band_h", "target_background_x", "target_background_y", "target_background_w", "target_background_h", "target_band_sum", "target_band_mean", "target_background_sum", "target_background_mean", "target_background_sd", "target_corrected", "target_signal_clipped_count", "target_signal_clipped_fraction", "target_background_clipped_count", "target_background_clipped_fraction", "loading_band_x", "loading_band_y", "loading_band_w", "loading_band_h", "loading_background_x", "loading_background_y", "loading_background_w", "loading_background_h", "loading_band_sum", "loading_band_mean", "loading_background_sum", "loading_background_mean", "loading_background_sd", "loading_corrected", "loading_signal_clipped_count", "loading_signal_clipped_fraction", "loading_background_clipped_count", "loading_background_clipped_fraction", "target_loading_ratio", "control_mean", "fold_change", "qc_codes"], ...results.normalized.map((row) => [
+        return [["target", "lane", "sample_id", "group", "biological_replicate", "technical_replicate", "excluded", "exclusion_note", "target_roi_method", "loading_roi_method", "target_band_x", "target_band_y", "target_band_w", "target_band_h", "target_background_x", "target_background_y", "target_background_w", "target_background_h", "target_band_sum", "target_band_mean", "target_fiji_intden", "target_background_sum", "target_background_mean", "target_background_sd", "target_corrected", "target_signal_clipped_count", "target_signal_clipped_fraction", "target_background_clipped_count", "target_background_clipped_fraction", "loading_band_x", "loading_band_y", "loading_band_w", "loading_band_h", "loading_background_x", "loading_background_y", "loading_background_w", "loading_background_h", "loading_band_sum", "loading_band_mean", "loading_fiji_intden", "loading_background_sum", "loading_background_mean", "loading_background_sd", "loading_corrected", "loading_signal_clipped_count", "loading_signal_clipped_fraction", "loading_background_clipped_count", "loading_background_clipped_fraction", "target_loading_ratio", "control_mean", "fold_change", "qc_codes"], ...results.normalized.map((row) => [
           row.target, row.lane, row.sampleId, row.group, row.biologicalReplicate, row.technicalReplicate, row.excluded, row.exclusionNote,
           state.quant.rois[row.targetKey]?.method || "manual", state.quant.rois[results.loadingKey]?.method || "manual",
           row.targetMeasurement.band.x, row.targetMeasurement.band.y, row.targetMeasurement.band.w, row.targetMeasurement.band.h,
           row.targetMeasurement.background.x, row.targetMeasurement.background.y, row.targetMeasurement.background.w, row.targetMeasurement.background.h,
-          row.targetMeasurement.bandSum, row.targetMeasurement.bandMean, row.targetMeasurement.backgroundSum, row.targetMeasurement.backgroundMean, row.targetMeasurement.backgroundSd, row.targetMeasurement.corrected,
+          row.targetMeasurement.bandSum, row.targetMeasurement.bandMean, row.targetMeasurement.fijiIntDen, row.targetMeasurement.backgroundSum, row.targetMeasurement.backgroundMean, row.targetMeasurement.backgroundSd, row.targetMeasurement.corrected,
           row.targetMeasurement.signalClippedCount, row.targetMeasurement.signalClippedFraction, row.targetMeasurement.backgroundClippedCount, row.targetMeasurement.backgroundClippedFraction,
           row.loadingMeasurement.band.x, row.loadingMeasurement.band.y, row.loadingMeasurement.band.w, row.loadingMeasurement.band.h,
           row.loadingMeasurement.background.x, row.loadingMeasurement.background.y, row.loadingMeasurement.background.w, row.loadingMeasurement.background.h,
-          row.loadingMeasurement.bandSum, row.loadingMeasurement.bandMean, row.loadingMeasurement.backgroundSum, row.loadingMeasurement.backgroundMean, row.loadingMeasurement.backgroundSd, row.loadingMeasurement.corrected,
+          row.loadingMeasurement.bandSum, row.loadingMeasurement.bandMean, row.loadingMeasurement.fijiIntDen, row.loadingMeasurement.backgroundSum, row.loadingMeasurement.backgroundMean, row.loadingMeasurement.backgroundSd, row.loadingMeasurement.corrected,
           row.loadingMeasurement.signalClippedCount, row.loadingMeasurement.signalClippedFraction, row.loadingMeasurement.backgroundClippedCount, row.loadingMeasurement.backgroundClippedFraction,
           row.ratio ?? "NA", row.controlMean ?? "NA", row.foldChange ?? "NA", [...new Set(row.qc)].join(";"),
         ])];
@@ -3227,10 +3483,47 @@
         return "\ufeff" + rows.map((row, rowIndex) => row.map((value) => csvCell(value, rowIndex > 0 && typeof value === "number")).join(",")).join("\r\n");
       }
 
+      function quantPlotDataRows(model = quantPlotModel()) {
+        if (!model) return [];
+        const maximumRows = Math.max(...model.groups.map((group) => group.values.length));
+        return [model.groups.map((group) => group.name), ...Array.from({ length: maximumRows }, (_, rowIndex) => model.groups.map((group) => group.values[rowIndex] ?? ""))];
+      }
+
+      function quantPlotStatisticsRows(model = quantPlotModel()) {
+        if (!model) return [];
+        const method = model.groups.length === 2 ? "Two-tailed unpaired Student t test (equal variance)" : "Ordinary one-way ANOVA with Dunnett control-vs-all";
+        const plotColors = window.WBCore.prismPlotColors(model.groups.length);
+        const colorMapping = model.groups.map((group, index) => `${group.name}=${plotColors[index].toUpperCase()}`).join("; ");
+        const rows = [
+          ["key", "value"],
+          ["target", model.targetName],
+          ["loading_control", model.loadingName],
+          ["metric", "target/loading biological-replicate ratio"],
+          ["plot", "bar mean with sample SD and all biological replicate points"],
+          ["statistics", method],
+          ["control_group", model.controlGroup],
+          ["group_colors", colorMapping],
+          [],
+          ["group", "n", "mean", "sd"],
+        ];
+        const summaries = model.statistics?.groups || model.groups.map((group) => {
+          const mean = group.values.reduce((sum, value) => sum + value, 0) / group.values.length;
+          const sd = group.values.length > 1 ? Math.sqrt(group.values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (group.values.length - 1)) : "NA";
+          return { name: group.name, n: group.values.length, mean, sd };
+        });
+        summaries.forEach((group) => rows.push([group.name, group.n, group.mean, group.sd]));
+        rows.push([], ["control_group", "comparison_group", "t", model.groups.length === 2 ? "p_value" : "dunnett_adjusted_p", "significance"]);
+        if (model.statistics) model.statistics.comparisons.forEach((comparison) => rows.push([comparison.controlGroup, comparison.group, comparison.t, comparison.pAdjusted, significanceStars(comparison.pAdjusted) || "ns"]));
+        else rows.push([model.controlGroup, "NA", "NA", "NA", model.statisticsError]);
+        return rows;
+      }
+
       function quantWorkbookSheets() {
         const results = state.quant.results;
         if (!results) return [];
         const prism = window.WBCore.prismColumnTables(results.normalized);
+        const plotModel = quantPlotModel();
+        const plotColors = plotModel ? window.WBCore.prismPlotColors(plotModel.groups.length) : [];
         return [
           { name: "Sample_Map", rows: [["lane", "sample_id", "lane_label", "group", "biological_replicate", "technical_replicate", "excluded", "exclusion_note"], ...state.quant.sampleMap.map((sample, index) => [sample.lane, sample.sampleId, state.laneLabels[index] || sample.sampleId, sample.group, sample.biologicalReplicate, sample.technicalReplicate, sample.excluded, sample.exclusionNote])] },
           { name: "ROI_Methods", rows: [["row_key", "protein", "role", "method", "confirmed"], ...state.rows.filter((row) => state.quant.rois[row.rowKey]).map((row) => [row.rowKey, row.name, row.role, state.quant.rois[row.rowKey].method || "manual", state.quant.rois[row.rowKey].confirmed])] },
@@ -3238,7 +3531,8 @@
           { name: "Normalized", rows: [["target", "sample_id", "group", "biological_replicate", "ratio", "control_mean", "fold_change", "qc"], ...results.normalized.map((row) => [row.target, row.sampleId, row.group, row.biologicalReplicate, row.ratio ?? "NA", row.controlMean ?? "NA", row.foldChange ?? "NA", [...new Set(row.qc)].join(";")])] },
           { name: "Summary", rows: [["target", "group", "n", "mean", "sd"], ...results.summary.map((row) => [row.target, row.group, row.n, row.mean ?? "NA", row.sd ?? "NA"])] },
           { name: "QC", rows: [["target", "sample_id", "codes"], ...results.normalized.map((row) => [row.target, row.sampleId, [...new Set(row.qc)].join(";")])] },
-          { name: "Metadata", rows: [["key", "value"], ["engine_version", window.WBCore.ENGINE_VERSION], ["computed_at_utc", results.computedAt], ["project_id", state.projectId], ["loading_control", results.loadingName], ["membrane_id", results.membraneId], ["control_group", state.quant.controlGroup], ["note", "All values recalculated from original 8-bit TIFF pixels; preview adjustments were ignored."], ["linear_range_note", "No endpoint saturation does not prove linear detection range."]] },
+          ...(plotModel ? [{ name: "Plot_Data", rows: quantPlotDataRows(plotModel) }, { name: "Plot_Stats", rows: quantPlotStatisticsRows(plotModel) }] : []),
+          { name: "Metadata", rows: [["key", "value"], ["engine_version", window.WBCore.ENGINE_VERSION], ["computed_at_utc", results.computedAt], ["project_id", state.projectId], ["loading_control", results.loadingName], ["membrane_id", results.membraneId], ["control_group", state.quant.controlGroup], ["plot_target", plotModel?.targetName || "NA"], ["plot_metric", "target/loading biological-replicate ratio"], ["plot_style", "User Prism 10.4.1 reference; dynamic group-count canvas; Arial; mean with sample SD and all points"], ["plot_group_colors", plotModel ? plotModel.groups.map((group, index) => `${group.name}=${plotColors[index].toUpperCase()}`).join("; ") : "NA"], ["note", "All values recalculated from original 8-bit TIFF pixels; preview adjustments were ignored."], ["fiji_intden_note", "Polarity-adjusted band ROI pixel sum for Fiji/JAR comparison only; no background subtraction."], ["linear_range_note", "No endpoint saturation does not prove linear detection range."]] },
           ...prism.map((table) => ({ name: `Prism_${table.name}`, rows: table.rows })),
         ];
       }
@@ -3255,7 +3549,12 @@
           entries.push({ name: `${prefix}prism/${stem}.csv`, data: rowsToCsv(table.rows) });
           entries.push({ name: `${prefix}prism/${stem}.xlsx`, data: window.WBCore.xlsxWorkbook([{ name: "Prism_Column", rows: table.rows }], { title: `${table.name} Prism column data` }) });
         });
-        entries.push({ name: `${prefix}prism/README.txt`, data: "GraphPad Prism Column 数据\r\n\r\n每个目的蛋白都有独立 CSV 和单工作表 XLSX。第一行为实验组，后续每行为一个生物学重复；可在 Prism 新建 Column table 后直接导入或复制粘贴。技术重复已先在同一生物学重复内取均值。\r\n" });
+        const plotModel = quantPlotModel();
+        if (plotModel) {
+          entries.push({ name: `${prefix}prism/${safeFilePart(plotModel.targetName)}-target-loading-ratio.csv`, data: rowsToCsv(quantPlotDataRows(plotModel)) });
+          entries.push({ name: `${prefix}prism/${safeFilePart(plotModel.targetName)}-plot-statistics.csv`, data: rowsToCsv(quantPlotStatisticsRows(plotModel)) });
+        }
+        entries.push({ name: `${prefix}prism/README.txt`, data: "GraphPad Prism Column 数据\r\n\r\n每个目的蛋白都有独立 Fold CSV 和单工作表 XLSX。第一行为实验组，后续每行为一个生物学重复；可在 Prism 新建 Column table 后直接导入或复制粘贴。技术重复已先在同一生物学重复内取均值。另附当前网页绘图所用的目的/内参比值 CSV 与统计结果 CSV，确保图、数据和 P 值可以互相追溯。\r\n" });
         return entries;
       }
 
@@ -3353,11 +3652,12 @@
 
       async function addQuantPanel() {
         if (!state.quant.results) return toast("请先完成灰度定量并生成统计图");
+        const model = renderQuantPlot();
+        if (!model) return toast("请选择可绘图的目的蛋白");
         const blob = await canvasBlob($("#quantPlot"), "image/png");
         const src = URL.createObjectURL(blob);
         const image = await loadImage(src);
-        const selected = state.rows.find((row) => row.rowKey === $("#quantRow").value);
-        state.panels.push({ key: newRowKey(), type: "quant", label: String.fromCharCode(65 + state.panels.length), name: `${selected?.name || "WB"} quantification`, src, image, sourceFile: new File([blob], "quantification.png", { type: "image/png" }) });
+        state.panels.push({ key: newRowKey(), type: "quant", label: String.fromCharCode(65 + state.panels.length), name: `${model.targetName} quantification`, src, image, sourceFile: new File([blob], `${safeFilePart(model.targetName)}-quantification.png`, { type: "image/png" }) });
         markDirty();
         renderPanelGrid();
       }
@@ -3510,7 +3810,7 @@
             state.rows[index].mw = mw;
             state.rows[index].role = role;
           });
-          if (rowMetadataChanged) { state.quant.results = null; invalidateExposureReport(); }
+          if (rowMetadataChanged) { invalidateQuantResults(); invalidateExposureReport(); }
           markDirty();
           syncWorkspaceFromState();
           toast("已应用本机版式模板");
@@ -4597,7 +4897,7 @@
         markDirty();
         requestRender();
       });
-      $("#footerLabel").addEventListener("input", (event) => { state.footerLabel = event.target.value; syncLaneToggleAvailability(); markDirty(); requestRender(); });
+      $("#footerLabel").addEventListener("input", (event) => { state.footerLabel = event.target.value; syncLaneToggleAvailability(); markDirty(); requestRender(); if (state.quant.results) renderQuantPlot(); });
       $("#compactPreset").addEventListener("click", () => {
         const laneLabelText = $("#laneLabelInput").value;
         let groups;
@@ -4691,19 +4991,19 @@
           if (row.rowKey === state.quant.loadingKey) row.role = "loading";
           else if (row.role === "loading") row.role = "target";
         });
-        state.quant.results = null;
+        invalidateQuantResults();
         markDirty();
         renderRows();
       });
-      $("#quantControlGroup").addEventListener("change", (event) => { state.quant.controlGroup = event.target.value; state.quant.results = null; markDirty(); });
+      $("#quantControlGroup").addEventListener("change", (event) => { state.quant.controlGroup = event.target.value; invalidateQuantResults(); markDirty(); });
       $("#quantPolarity").addEventListener("change", (event) => {
         const entry = quantView && state.quant.rois[quantView.row.rowKey];
-        if (entry) { entry.polarity = event.target.value === "bright" ? "bright" : "dark"; entry.confirmed = false; state.quant.results = null; invalidateExposureReport(); markDirty(); }
+        if (entry) { entry.polarity = event.target.value === "bright" ? "bright" : "dark"; entry.confirmed = false; invalidateQuantResults(); invalidateExposureReport(); markDirty(); }
       });
       $("#quantMembrane").addEventListener("input", (event) => {
         if (!quantView) return;
         quantView.row.membraneId = event.target.value.trim();
-        state.quant.results = null;
+        invalidateQuantResults();
         invalidateExposureReport();
         markDirty();
       });
@@ -4716,6 +5016,8 @@
       $("#exportQuantCsv").addEventListener("click", exportQuantCsv);
       $("#exportQuantXlsx").addEventListener("click", exportQuantXlsx);
       $("#exportPrism").addEventListener("click", exportPrismPackage);
+      $("#quantPlotTarget").addEventListener("change", renderQuantPlot);
+      $("#exportQuantPlotPng").addEventListener("click", exportQuantPlotPng);
       $("#chooseSampleMapFile").addEventListener("click", () => $("#sampleMapFile").click());
       $("#sampleMapFile").addEventListener("change", async (event) => {
         const file = event.target.files[0];
