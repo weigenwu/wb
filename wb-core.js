@@ -5,7 +5,7 @@
 })(typeof globalThis === "undefined" ? this : globalThis, function () {
   "use strict";
 
-  const ENGINE_VERSION = "2.2.2";
+  const ENGINE_VERSION = "2.4.0";
   const encoder = new TextEncoder();
 
   function bytes(value) {
@@ -560,6 +560,7 @@
     const backgroundEndpoint = polarity === "bright" ? 0 : 255;
     const bandStats = roiStats(pixels, width, band, signalEndpoint);
     const backgroundStats = roiStats(pixels, width, background, backgroundEndpoint);
+    const fijiIntDen = polarity === "bright" ? bandStats.sum : bandStats.count * 255 - bandStats.sum;
     const corrected = polarity === "bright"
       ? bandStats.sum - backgroundStats.mean * bandStats.count
       : backgroundStats.mean * bandStats.count - bandStats.sum;
@@ -573,6 +574,7 @@
       background,
       bandSum: bandStats.sum,
       bandMean: bandStats.mean,
+      fijiIntDen,
       backgroundSum: backgroundStats.sum,
       backgroundMean: backgroundStats.mean,
       backgroundSd: backgroundStats.sd,
@@ -663,6 +665,246 @@
     if (values.length < 2) return null;
     const average = mean(values);
     return Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / (values.length - 1));
+  }
+
+  const DUNNETT_QUADRATURE_ORDER = 128;
+  let normalQuadrature;
+  const chiSquareQuadratures = new Map();
+
+  function complementaryErrorFunction(value) {
+    const absolute = Math.abs(value);
+    const t = 1 / (1 + .5 * absolute);
+    const polynomial = t * (1.00002368 + t * (.37409196 + t * (.09678418 + t * (-.18628806 + t * (.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-.82215223 + t * .17087277))))))));
+    const result = t * Math.exp(-absolute * absolute - 1.26551223 + polynomial);
+    return value >= 0 ? result : 2 - result;
+  }
+
+  function normalInterval(lower, upper) {
+    const scale = Math.SQRT1_2;
+    if (lower >= 0) return .5 * (complementaryErrorFunction(lower * scale) - complementaryErrorFunction(upper * scale));
+    if (upper <= 0) return .5 * (complementaryErrorFunction(-upper * scale) - complementaryErrorFunction(-lower * scale));
+    return 1 - .5 * (complementaryErrorFunction(-lower * scale) + complementaryErrorFunction(upper * scale));
+  }
+
+  function logGamma(value) {
+    const coefficients = [
+      .9999999999998099, 676.5203681218851, -1259.1392167224028, 771.3234287776531,
+      -176.6150291621406, 12.507343278686905, -.13857109526572012, 9.984369578019572e-6, 1.5056327351493116e-7,
+    ];
+    const shifted = value - 1;
+    let series = coefficients[0];
+    for (let index = 1; index < coefficients.length; index += 1) series += coefficients[index] / (shifted + index);
+    const scale = shifted + 7.5;
+    return .5 * Math.log(2 * Math.PI) + (shifted + .5) * Math.log(scale) - scale + Math.log(series);
+  }
+
+  function betaContinuedFraction(a, b, value) {
+    const minimum = 1e-300;
+    const sum = a + b;
+    let denominator = 1 - sum * value / (a + 1);
+    if (Math.abs(denominator) < minimum) denominator = minimum;
+    denominator = 1 / denominator;
+    let numerator = 1;
+    let fraction = denominator;
+    for (let iteration = 1; iteration <= 200; iteration += 1) {
+      const doubled = 2 * iteration;
+      let factor = iteration * (b - iteration) * value / ((a - 1 + doubled) * (a + doubled));
+      denominator = 1 + factor * denominator;
+      numerator = 1 + factor / numerator;
+      if (Math.abs(denominator) < minimum) denominator = minimum;
+      if (Math.abs(numerator) < minimum) numerator = minimum;
+      denominator = 1 / denominator;
+      fraction *= denominator * numerator;
+      factor = -(a + iteration) * (sum + iteration) * value / ((a + doubled) * (a + 1 + doubled));
+      denominator = 1 + factor * denominator;
+      numerator = 1 + factor / numerator;
+      if (Math.abs(denominator) < minimum) denominator = minimum;
+      if (Math.abs(numerator) < minimum) numerator = minimum;
+      denominator = 1 / denominator;
+      const change = denominator * numerator;
+      fraction *= change;
+      if (Math.abs(change - 1) < 3e-14) return fraction;
+    }
+    throw new Error("Student t probability did not converge");
+  }
+
+  function regularizedBeta(value, a, b) {
+    if (value <= 0) return 0;
+    if (value >= 1) return 1;
+    const factor = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(value) + b * Math.log1p(-value));
+    return value < (a + 1) / (a + b + 2)
+      ? factor * betaContinuedFraction(a, b, value) / a
+      : 1 - factor * betaContinuedFraction(b, a, 1 - value) / b;
+  }
+
+  function twoSidedStudentTP(threshold, df) {
+    return regularizedBeta(df / (df + threshold * threshold), df / 2, .5);
+  }
+
+  function gaussHermite(order) {
+    const nodes = new Float64Array(order);
+    const weights = new Float64Array(order);
+    const half = Math.ceil(order / 2);
+    let root = 0;
+    for (let index = 0; index < half; index += 1) {
+      if (index === 0) root = Math.sqrt(2 * order + 1) - 1.85575 * (2 * order + 1) ** (-1 / 6);
+      else if (index === 1) root -= 1.14 * order ** .426 / root;
+      else if (index === 2) root = 1.86 * root - .86 * nodes[0];
+      else if (index === 3) root = 1.91 * root - .91 * nodes[1];
+      else root = 2 * root - nodes[index - 2];
+      let previous;
+      let derivative = 0;
+      for (let iteration = 0; iteration < 20; iteration += 1) {
+        let polynomial = Math.PI ** -.25;
+        let prior = 0;
+        for (let degree = 1; degree <= order; degree += 1) {
+          const earlier = prior;
+          prior = polynomial;
+          polynomial = root * Math.sqrt(2 / degree) * prior - Math.sqrt((degree - 1) / degree) * earlier;
+        }
+        derivative = Math.sqrt(2 * order) * prior;
+        previous = root;
+        root -= polynomial / derivative;
+        if (Math.abs(root - previous) <= 1e-14 * Math.max(1, Math.abs(root))) break;
+        if (iteration === 19) throw new Error("Dunnett normal quadrature did not converge");
+      }
+      nodes[index] = root;
+      nodes[order - 1 - index] = -root;
+      weights[index] = 1 / (derivative * derivative);
+      weights[order - 1 - index] = weights[index];
+    }
+    const total = weights.reduce((sum, weight) => sum + weight, 0);
+    for (let index = 0; index < order; index += 1) weights[index] /= total;
+    return { nodes, weights };
+  }
+
+  function gaussLaguerre(order, alpha) {
+    const nodes = new Float64Array(order);
+    const weights = new Float64Array(order);
+    let root = 0;
+    for (let index = 0; index < order; index += 1) {
+      if (index === 0) root = (1 + alpha) * (3 + .92 * alpha) / (1 + 2.4 * order + 1.8 * alpha);
+      else if (index === 1) root += (15 + 6.25 * alpha) / (1 + .9 * alpha + 2.5 * order);
+      else {
+        const position = index - 1;
+        root += ((1 + 2.55 * position) / (1.9 * position) + 1.26 * position * alpha / (1 + 3.5 * position)) * (root - nodes[index - 2]) / (1 + .3 * alpha);
+      }
+      let prior = 0;
+      let derivative = 0;
+      for (let iteration = 0; iteration < 20; iteration += 1) {
+        let polynomial = 1;
+        prior = 0;
+        for (let degree = 1; degree <= order; degree += 1) {
+          const earlier = prior;
+          prior = polynomial;
+          polynomial = ((2 * degree - 1 + alpha - root) * prior - (degree - 1 + alpha) * earlier) / degree;
+        }
+        derivative = (order * polynomial - (order + alpha) * prior) / root;
+        const previous = root;
+        root -= polynomial / derivative;
+        if (Math.abs(root - previous) <= 1e-14 * Math.max(1, Math.abs(root))) break;
+        if (iteration === 19) throw new Error("Dunnett chi-square quadrature did not converge");
+      }
+      nodes[index] = root;
+      weights[index] = -1 / (derivative * prior);
+    }
+    const total = weights.reduce((sum, weight) => sum + weight, 0);
+    for (let index = 0; index < order; index += 1) weights[index] /= total;
+    return { nodes, weights };
+  }
+
+  function dunnettAdjustedP(threshold, df, coefficients) {
+    if (threshold === 0) return 1;
+    if (!Number.isFinite(threshold)) return 0;
+    if (coefficients.length === 1) return Math.max(0, Math.min(1, twoSidedStudentTP(threshold, df)));
+    normalQuadrature ||= gaussHermite(DUNNETT_QUADRATURE_ORDER);
+    if (!chiSquareQuadratures.has(df)) chiSquareQuadratures.set(df, gaussLaguerre(DUNNETT_QUADRATURE_ORDER, df / 2 - 1));
+    const chiSquare = chiSquareQuadratures.get(df);
+    let probability = 0;
+    for (let scaleIndex = 0; scaleIndex < DUNNETT_QUADRATURE_ORDER; scaleIndex += 1) {
+      const boundary = threshold * Math.sqrt(2 * chiSquare.nodes[scaleIndex] / df);
+      let conditionalTail = 0;
+      for (let normalIndex = 0; normalIndex < DUNNETT_QUADRATURE_ORDER; normalIndex += 1) {
+        const sharedNormal = Math.SQRT2 * normalQuadrature.nodes[normalIndex];
+        let within = 1;
+        for (const { shared, independent } of coefficients) {
+          within *= Math.max(0, Math.min(1, normalInterval((-boundary - shared * sharedNormal) / independent, (boundary - shared * sharedNormal) / independent)));
+        }
+        conditionalTail += normalQuadrature.weights[normalIndex] * (1 - within);
+      }
+      probability += chiSquare.weights[scaleIndex] * conditionalTail;
+    }
+    return Math.max(0, Math.min(1, probability));
+  }
+
+  function ordinaryAnovaDunnett(inputGroups, controlGroup) {
+    if (!Array.isArray(inputGroups) || inputGroups.length < 2) throw new Error("Dunnett analysis requires at least two groups");
+    if (typeof controlGroup !== "string" || !controlGroup.trim()) throw new Error("Dunnett controlGroup must be a non-empty group name");
+    const names = new Set();
+    const groups = inputGroups.map((group, index) => {
+      if (!group || typeof group.name !== "string" || !group.name.trim()) throw new Error(`Dunnett group ${index + 1} must have a non-empty name`);
+      if (names.has(group.name)) throw new Error(`Dunnett group names must be unique: ${group.name}`);
+      names.add(group.name);
+      if (!Array.isArray(group.values) || group.values.length < 2) throw new Error(`Dunnett group ${group.name} requires at least two biological replicates`);
+      if (group.values.some((value) => typeof value !== "number" || !Number.isFinite(value))) throw new Error(`Dunnett group ${group.name} contains a non-finite numeric value`);
+      const average = mean(group.values);
+      const sumSquares = group.values.reduce((sum, value) => sum + (value - average) ** 2, 0);
+      const sd = Math.sqrt(sumSquares / (group.values.length - 1));
+      if (![average, sumSquares, sd].every(Number.isFinite)) throw new Error(`Dunnett group ${group.name} values exceed the supported numeric range`);
+      return { name: group.name, n: group.values.length, mean: average, sd, sumSquares };
+    });
+    const control = groups.find((group) => group.name === controlGroup);
+    if (!control) throw new Error(`Dunnett control group was not found: ${controlGroup}`);
+    const df = groups.reduce((sum, group) => sum + group.n - 1, 0);
+    const mse = groups.reduce((sum, group) => sum + group.sumSquares, 0) / df;
+    if (!Number.isFinite(mse)) throw new Error("Dunnett pooled MSE exceeds the supported numeric range");
+    const treatments = groups.filter((group) => group !== control);
+    const coefficients = treatments.map((group) => {
+      const standardErrorFactor = Math.sqrt(1 / control.n + 1 / group.n);
+      return { shared: Math.sqrt(1 / control.n) / standardErrorFactor, independent: Math.sqrt(1 / group.n) / standardErrorFactor };
+    });
+    const comparisons = treatments.map((group) => {
+      const difference = control.mean - group.mean;
+      const standardError = Math.sqrt(mse * (1 / control.n + 1 / group.n));
+      const t = standardError ? difference / standardError : difference === 0 ? 0 : Math.sign(difference) * Infinity;
+      return { controlGroup, group: group.name, t, pAdjusted: dunnettAdjustedP(Math.abs(t), df, coefficients) };
+    });
+    return {
+      groups: groups.map(({ name, n, mean: average, sd }) => ({ name, n, mean: average, sd })),
+      controlGroup,
+      mse,
+      df,
+      comparisons,
+    };
+  }
+
+  function prismPlotGeometry(groupCount) {
+    if (!Number.isInteger(groupCount) || groupCount < 1 || groupCount > 24) throw new Error("Prism plot groupCount must be an integer from 1 to 24");
+    const wide = groupCount > 3;
+    const plotWidth = wide ? 18 * groupCount + 36 : 35.4 * groupCount;
+    const plotLeft = wide ? 52.56 : 65.04;
+    const logicalWidth = wide ? plotLeft + plotWidth + 13.32 + .24 * groupCount : 205.44;
+    return {
+      logicalWidth,
+      logicalHeight: wide ? 268.8 : 273.6,
+      plotLeft,
+      plotTop: wide ? 41.88 : 80.64,
+      plotWidth,
+      plotHeight: 144,
+      barWidth: Math.min(21.12, plotWidth * 2 / (3 * groupCount + 1)),
+      rotateGroupLabels: wide,
+    };
+  }
+
+  function prismPlotColors(groupCount) {
+    prismPlotGeometry(groupCount);
+    const blue = "#3f69a9";
+    const orange = "#d96025";
+    const yellow = "#e69d21";
+    if (groupCount === 6) return [blue, blue, blue, blue, orange, yellow];
+    if (groupCount === 10) return [...Array(9).fill(blue), orange];
+    const palette = [blue, orange, yellow, "#efa39f", "#a0d8ea", "#f7cb65"];
+    return Array.from({ length: groupCount }, (_, index) => palette[index % palette.length]);
   }
 
   function summarizeNormalized(normalizedRows) {
@@ -889,6 +1131,9 @@
     normalizeMeasurements,
     prismColumnTables,
     summarizeNormalized,
+    ordinaryAnovaDunnett,
+    prismPlotGeometry,
+    prismPlotColors,
     flattenDisplayBackground,
     estimateStripRotation,
     runIntegrityChecks,

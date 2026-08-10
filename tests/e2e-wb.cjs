@@ -172,6 +172,11 @@ async function waitForServer(url) {
     await page.locator("#quantRow").selectOption(targetKey);
     await page.locator("#quantMembrane").fill("membrane-1");
     await page.locator("#quantPolarity").selectOption("bright");
+    const maxRoiHeight = Number(await page.locator("#quantRoiHeight").getAttribute("max"));
+    assert.ok(Number(await page.locator("#quantRoiHeight").inputValue()) >= 2 && maxRoiHeight >= 2, "ROI height should be explicit and editable in pixels");
+    await page.locator("#quantRoiHeight").fill(String(maxRoiHeight + 100));
+    await page.locator("#initializeRois").click();
+    assert.match(await page.locator("#quantStatus").textContent(), new RegExp(`${maxRoiHeight} px`), "uniform initialization must clamp height before band/background ROIs can overlap");
     await page.locator("#suggestRois").click();
     assert.match(await page.locator("#quantStatus").textContent(), /信号建议/);
     await page.locator("#quantMapLocked").check();
@@ -189,7 +194,9 @@ async function waitForServer(url) {
     await page.locator("#quantRow").selectOption(loadingKey);
     await page.locator("#quantMembrane").fill("membrane-1");
     await page.locator("#quantPolarity").selectOption("bright");
-    await page.locator("#suggestRois").click();
+    await page.locator("#quantRoiHeight").fill("12");
+    await page.locator("#initializeRois").click();
+    assert.match(await page.locator("#quantStatus").textContent(), /12 px/);
     await page.locator("#calculateQuant").click();
     try {
       await page.waitForFunction(() => document.querySelectorAll("#quantResults tbody tr").length === 3, null, { timeout: 10_000 });
@@ -197,6 +204,57 @@ async function waitForServer(url) {
       console.error(`quant status: ${await page.locator("#quantStatus").textContent()}\ntoast: ${await page.locator("#toast").textContent()}\nresults: ${await page.locator("#quantResults").innerText()}\nconsole: ${errors.join(" | ")}`);
       throw error;
     }
+    assert.match(await page.locator("#quantResults thead").textContent(), /IntDen（Fiji 对照）/);
+    assert.doesNotMatch(await page.locator("#quantResults tbody").textContent(), /NaN/);
+    assert.equal(await page.locator("#quantPlotTarget").inputValue(), targetKey, "plot target must remain independent from the ROI row left on the loading control");
+    assert.equal(await page.locator("#quantPlotTarget option").count(), 1, "the loading control must not appear as a plot target");
+    assert.equal(await page.locator("#quantPlotLoadingName").textContent(), "Loading control");
+    assert.match(await page.locator("#quantPlotStatus").textContent(), /Target protein \/ Loading control/);
+    const plotInfo = await page.locator("#quantPlot").evaluate((canvas) => {
+      const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+      let coloredPixels = 0;
+      let bluePixels = 0;
+      let orangePixels = 0;
+      for (let index = 0; index < data.length; index += 4) {
+        if (data[index] !== data[index + 1] || data[index + 1] !== data[index + 2]) coloredPixels += 1;
+        if (data[index] === 63 && data[index + 1] === 105 && data[index + 2] === 169) bluePixels += 1;
+        if (data[index] === 217 && data[index + 1] === 96 && data[index + 2] === 37) orangePixels += 1;
+      }
+      return { width: canvas.width, height: canvas.height, coloredPixels, bluePixels, orangePixels };
+    });
+    assert.deepEqual({ width: plotInfo.width, height: plotInfo.height }, { width: 856, height: 1140 });
+    assert.ok(plotInfo.coloredPixels > 1000, "Prism-style plot should contain the user palette, not an empty canvas");
+    assert.ok(plotInfo.bluePixels > 100 && plotInfo.orangePixels > 100, "plot bars must preserve the blue/orange palette parsed from the Prism project");
+    const plotDownload = page.waitForEvent("download");
+    await page.locator("#exportQuantPlotPng").click();
+    const plotFile = await plotDownload;
+    assert.match(plotFile.suggestedFilename(), /Target protein-prism-style-300dpi\.png$/);
+    const plotPng = fs.readFileSync(await plotFile.path());
+    assert.equal(plotPng.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+    assert.equal(plotPng.readUInt32BE(16), 856);
+    assert.equal(plotPng.readUInt32BE(20), 1140);
+    assert.ok(plotPng.includes(Buffer.from("pHYs")), "plot PNG must carry 300 DPI resolution metadata");
+    await page.locator("#quantMembrane").fill("membrane-temporary");
+    assert.ok(await page.locator("#exportQuantPlotPng").isDisabled(), "changing a quantification input must disable stale plot export immediately");
+    assert.match(await page.locator("#quantResults").textContent(), /尚未计算/);
+    await page.locator("#quantMembrane").fill("membrane-1");
+    await page.locator("#calculateQuant").click();
+    await page.waitForFunction(() => document.querySelectorAll("#quantResults tbody tr").length === 3);
+    assert.equal(await page.locator("#quantPlotTarget").inputValue(), targetKey);
+    const detailDownload = page.waitForEvent("download");
+    await page.locator("#exportQuantCsv").click();
+    const detailFile = await detailDownload;
+    const detailCsv = fs.readFileSync(await detailFile.path(), "utf8");
+    assert.match(detailCsv, /target_fiji_intden/);
+    assert.match(detailCsv, /loading_fiji_intden/);
+    const workbookDownload = page.waitForEvent("download");
+    await page.locator("#exportQuantXlsx").click();
+    const workbookFile = await workbookDownload;
+    const workbookBytes = fs.readFileSync(await workbookFile.path());
+    assert.equal(workbookBytes.subarray(0, 2).toString("ascii"), "PK");
+    assert.ok(workbookBytes.includes(Buffer.from("Plot_Data")), "quantification workbook must include the exact plotted ratio table");
+    assert.ok(workbookBytes.includes(Buffer.from("Plot_Stats")), "quantification workbook must include the plot statistics and group colors");
+    assert.ok(workbookBytes.includes(Buffer.from("target/loading biological-replicate ratio")));
 
     await page.locator("#exposureCheck summary").click();
     await page.locator("#exposureFiles").setInputFiles([exposureShort, exposureLong]);
@@ -247,6 +305,8 @@ async function waitForServer(url) {
     const prismBytes = fs.readFileSync(await prismFile.path());
     assert.equal(prismBytes.subarray(0, 2).toString("ascii"), "PK");
     assert.ok(prismBytes.includes(Buffer.from('"Control","Drug"\r\n')), "Prism CSV must start with clean group columns");
+    assert.ok(prismBytes.includes(Buffer.from("Target protein-target-loading-ratio.csv")), "Prism package must include the exact ratio data used by the plot");
+    assert.ok(prismBytes.includes(Buffer.from("Target protein-plot-statistics.csv")), "Prism package must include reproducible plot statistics");
     await page.setViewportSize({ width: 390, height: 844 });
     const mobileQuant = await page.evaluate(() => {
       const dialog = document.querySelector("#quantDialog").getBoundingClientRect();
@@ -254,7 +314,7 @@ async function waitForServer(url) {
     });
     assert.ok(mobileQuant.pageWidth <= mobileQuant.viewportWidth + 1, "mobile quantification dialog must not overflow the page");
     assert.ok(mobileQuant.dialogLeft >= 0 && mobileQuant.dialogRight <= mobileQuant.viewportWidth + 1, "mobile quantification dialog must stay inside the viewport");
-    if (process.env.E2E_QUANT_SCREENSHOT) await page.screenshot({ path: process.env.E2E_QUANT_SCREENSHOT, fullPage: false });
+    if (process.env.E2E_QUANT_SCREENSHOT) await page.locator("#quantPlot").screenshot({ path: process.env.E2E_QUANT_SCREENSHOT });
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.locator('[data-close-dialog="quantDialog"]').click();
 
@@ -268,6 +328,7 @@ async function waitForServer(url) {
     await page.locator("#addQuantPanel").click();
     await page.waitForFunction(() => document.querySelectorAll("#panelGrid .panel-card").length === 2);
     assert.equal(await page.locator("#panelGrid .panel-card").count(), 2);
+    assert.match(await page.locator("#panelGrid .panel-card").nth(1).textContent(), /Target protein quantification/, "panel builder must add the selected plot target, not the current loading-control ROI row");
     const panelDownload = page.waitForEvent("download");
     await page.locator("#exportPanelPng").click();
     const panelFile = await panelDownload;
@@ -300,7 +361,7 @@ async function waitForServer(url) {
     assert.equal(project.rows[1].rotation, -2.3);
     assert.equal(project.panels.length, 1);
     assert.equal(project.settings.quant.rois[targetKey].method, "row-contrast-v1");
-    assert.equal(project.settings.quant.rois[loadingKey].method, "row-contrast-v1");
+    assert.equal(project.settings.quant.rois[loadingKey].method, "uniform-v2");
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#newProject").click();
     await page.locator("#projectFile").setInputFiles(projectPath);
@@ -313,6 +374,8 @@ async function waitForServer(url) {
     await page.locator("#quantDialog").waitFor({ state: "visible" });
     assert.equal(await page.locator('#sampleMapBody [data-map="sampleId"]').first().inputValue(), "C1", "v2 import must restore the sample map");
     assert.ok(await page.locator("#quantMapLocked").isChecked(), "v2 import must restore the mapping lock");
+    await page.locator("#quantRow").selectOption(targetKey);
+    await page.waitForFunction(() => document.querySelector("#quantStatus")?.textContent.includes("信号建议"));
     assert.match(await page.locator("#quantStatus").textContent(), /信号建议/, "v2 import must restore ROI provenance");
     await page.locator('[data-close-dialog="quantDialog"]').click();
     await page.locator("#openPanels").click();
