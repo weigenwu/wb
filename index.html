@@ -416,7 +416,7 @@
     .check-section.pass { border-color: #a9dfcf; background: #f4fcf9; }
     .quant-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; }
     .quant-stage { overflow: auto; min-height: 360px; padding: 12px; border-radius: 12px; background: #17202e; }
-    #quantCanvas { display: block; max-width: 100%; height: auto; margin: auto; touch-action: none; cursor: crosshair; }
+    #quantCanvas, #grayReaderCanvas { display: block; max-width: 100%; height: auto; margin: auto; touch-action: none; cursor: crosshair; }
     .quant-side { display: grid; align-content: start; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #f8faff; }
     .quant-side label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 750; }
     .sample-map { width: 100%; border-collapse: collapse; font-size: 11px; }
@@ -552,7 +552,7 @@
         <p class="lead">上传已经显影的条带图，网页会把蛋白名称、分组线和分子量统一排好。裁剪、亮度与对比度可随时微调，完成后直接导出论文可用的 PNG 或 SVG。</p>
         <div class="hero-actions">
           <a class="button primary" href="#studio">现在开始组图</a>
-          <a class="button ghost" href="#features">了解功能</a>
+          <button class="button ghost" data-open-gray-reader type="button">直接读取灰度</button>
         </div>
         <p class="privacy-note">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2m-9 0h8a2 2 0 0 1 2 2v7H6v-7a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -684,8 +684,9 @@
                 <button class="button small" id="copyPng" type="button">复制图片</button>
               </div>
               <div class="project-actions">
-                <button class="button small primary" id="openPreflight" type="button">投稿检查</button>
-                <button class="button small" id="openQuant" type="button" title="从原始 8-bit TIFF 计算 IntDen、背景校正、内参归一化和 Fold change">WB 灰度定量</button>
+                <button class="button small primary" id="openGrayReader" type="button">快速读取灰度</button>
+                <button class="button small" id="openQuant" type="button" title="目的蛋白/内参归一化、Fold、统计与 Prism 风格作图">归一化与作图</button>
+                <button class="button small" id="openPreflight" type="button">投稿检查</button>
                 <button class="button small" id="openPanels" type="button">多面板排版</button>
                 <button class="button small" id="exportPackage" type="button">投稿合规包</button>
                 <button class="button small" id="newProject" type="button">新建图组</button>
@@ -757,8 +758,33 @@
     <div class="dialog-foot"><p>未发现端点饱和不等于信号处于线性检测范围；请结合曝光梯度和实验记录判断。</p><div class="dialog-actions"><button class="button small" id="downloadPreflight" type="button">下载检查报告</button><button class="button small primary" data-close-dialog="preflightDialog" type="button">完成</button></div></div>
   </dialog>
 
+  <dialog id="grayReaderDialog" class="science-dialog" aria-labelledby="grayReaderTitle">
+    <div class="dialog-head"><div><h2 id="grayReaderTitle">快速读取 WB 灰度</h2><p>输入泳道数，从第一道左边缘拖到最后一道右边缘；松开立即得到每道灰度。</p></div><button class="icon-button" data-close-dialog="grayReaderDialog" type="button" aria-label="关闭">✕</button></div>
+    <div class="science-body">
+      <div class="science-toolbar">
+        <input id="grayReaderFile" type="file" accept=".tif,.tiff,image/tiff" hidden>
+        <button class="button small primary" id="chooseGrayReaderFile" type="button">选择原始 TIFF</button>
+        <span id="grayReaderFileName" class="field-help">尚未选择文件</span>
+        <label>泳道数<input id="grayReaderLaneCount" type="number" min="1" max="24" step="1" value="3" inputmode="numeric"></label>
+        <label>条带外观<select id="grayReaderPolarity"><option value="dark">黑色条带 / 亮背景</option><option value="bright">白色条带 / 暗背景</option></select></label>
+      </div>
+      <div class="quant-layout">
+        <div class="quant-stage"><canvas id="grayReaderCanvas" width="900" height="500" tabindex="0" aria-label="快速 WB 灰度读取画布"></canvas></div>
+        <div class="quant-side">
+          <strong>只读取灰度</strong>
+          <p id="grayReaderStatus" class="field-help" aria-live="polite">先选择 TIFF，再输入泳道数并横向拉线。</p>
+          <div id="grayReaderResults" class="results-table" aria-live="polite"><p class="field-help" style="padding:10px">结果会显示在这里。</p></div>
+          <div class="dialog-actions"><button class="button small" id="copyGrayReaderValues" type="button" disabled>复制两列</button><button class="button small primary" id="downloadGrayReaderCsv" type="button" disabled>下载灰度 CSV</button></div>
+          <p class="field-help"><strong>作图建议：</strong>复制“背景校正灰度”。下载的 CSV 还会保留 ROI、背景、Fiji IntDen 与 QC，方便核对。</p>
+          <details><summary>可选：调整 ROI 高度</summary><div style="padding-top:9px"><label>ROI 高度（px）<input id="grayReaderRoiHeight" type="number" min="2" max="200" step="1" value="12" inputmode="numeric"></label><p class="field-help">默认 12 px；黄色框应刚好覆盖条带厚度。</p></div></details>
+        </div>
+      </div>
+    </div>
+    <div class="dialog-foot"><p>这里不做样本分组、内参归一化、Fold 或作图；这些功能已独立放在“归一化与作图”。原始 TIFF 只在浏览器本地读取。</p></div>
+  </dialog>
+
   <dialog id="quantDialog" class="science-dialog" aria-labelledby="quantTitle">
-    <div class="dialog-head"><div><h2 id="quantTitle">WB 灰度定量</h2><p>仅使用 8-bit 单通道原始 TIFF；在条带中心直接拉横线，松开即显示每个泳道的灰度。</p></div><button class="icon-button" data-close-dialog="quantDialog" type="button" aria-label="关闭">✕</button></div>
+    <div class="dialog-head"><div><h2 id="quantTitle">WB 归一化与作图</h2><p>用于目的/内参或 N/FL 的 Fold、统计与 Prism 风格图；只读取灰度请使用独立的“快速读取灰度”。</p></div><button class="icon-button" data-close-dialog="quantDialog" type="button" aria-label="关闭">✕</button></div>
     <div class="science-body">
       <div class="science-toolbar">
         <label>定量模式<select id="quantNormalizationMode"><option value="loading">常规：目的蛋白 / 上样内参</option><option value="paired-band">裂解：同泳道 N 段 / 全长</option></select></label>
@@ -924,6 +950,8 @@
       let quantDrag = null;
       let quantGuide = null;
       const quantQuickRows = new Set();
+      let grayReader = { file: null, sha256: "", decoded: null, sourceCanvas: null, drag: null, rois: null, measurements: [] };
+      let grayReaderLoadToken = 0;
       let exposureCheck = { rowKey: "", items: [], report: null };
       let exposureRunToken = 0;
       const decodedTiffCache = new WeakMap();
@@ -2483,6 +2511,228 @@
       async function decodeQuantRow(row) {
         if (!row?.sourceFile) throw new Error(`${row?.name || "该条带"} 缺少原始 TIFF`);
         return decodeQuantFile(row.sourceFile);
+      }
+
+      function grayReaderLaneCount() {
+        const value = Number($("#grayReaderLaneCount").value);
+        if (!Number.isInteger(value) || value < 1 || value > 24) throw new Error("泳道数必须是 1–24 的整数");
+        return value;
+      }
+
+      function grayReaderRoiHeight() {
+        const value = Number($("#grayReaderRoiHeight").value);
+        if (!Number.isInteger(value) || value < 2 || value > 200) throw new Error("ROI 高度必须是 2–200 px 的整数");
+        return value;
+      }
+
+      function grayReaderSourceCanvas(decoded) {
+        const canvas = document.createElement("canvas");
+        canvas.width = decoded.width;
+        canvas.height = decoded.height;
+        const context = canvas.getContext("2d");
+        const imageData = context.createImageData(decoded.width, decoded.height);
+        for (let source = 0, target = 0; source < decoded.pixels.length; source += 1, target += 4) {
+          const value = decoded.pixels[source];
+          imageData.data[target] = value;
+          imageData.data[target + 1] = value;
+          imageData.data[target + 2] = value;
+          imageData.data[target + 3] = 255;
+        }
+        context.putImageData(imageData, 0, 0);
+        return canvas;
+      }
+
+      function grayReaderPoint(event) {
+        const canvas = $("#grayReaderCanvas");
+        const rect = canvas.getBoundingClientRect();
+        return {
+          x: Math.max(0, Math.min(grayReader.decoded.width, (event.clientX - rect.left) * grayReader.decoded.width / rect.width)),
+          y: Math.max(0, Math.min(grayReader.decoded.height, (event.clientY - rect.top) * grayReader.decoded.height / rect.height)),
+        };
+      }
+
+      function paintGrayReader() {
+        const canvas = $("#grayReaderCanvas");
+        const context = canvas.getContext("2d");
+        if (!grayReader.decoded) {
+          canvas.width = 900;
+          canvas.height = 500;
+          context.fillStyle = "#17202e";
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          context.fillStyle = "#d8e2f0";
+          context.font = "700 18px Arial";
+          context.textAlign = "center";
+          context.fillText("请选择原始 8-bit TIFF", canvas.width / 2, canvas.height / 2);
+          return;
+        }
+        const decoded = grayReader.decoded;
+        const scale = Math.min(3, 1000 / decoded.width, 620 / decoded.height);
+        canvas.width = Math.max(1, Math.round(decoded.width * scale));
+        canvas.height = Math.max(1, Math.round(decoded.height * scale));
+        context.imageSmoothingEnabled = false;
+        context.drawImage(grayReader.sourceCanvas, 0, 0, canvas.width, canvas.height);
+        const scaleX = canvas.width / decoded.width;
+        const scaleY = canvas.height / decoded.height;
+        if (grayReader.drag) {
+          const { start, end } = grayReader.drag;
+          const y = (start.y + end.y) / 2 * scaleY;
+          context.save();
+          context.strokeStyle = "#22c3ee";
+          context.lineWidth = 3;
+          context.setLineDash([10, 7]);
+          context.beginPath();
+          context.moveTo(start.x * scaleX, y);
+          context.lineTo(end.x * scaleX, y);
+          context.stroke();
+          context.restore();
+          return;
+        }
+        (grayReader.rois || []).forEach((lane, index) => {
+          [[lane.band, "#facc15"], [lane.background, "#22c3ee"]].forEach(([roi, color]) => {
+            context.strokeStyle = color;
+            context.lineWidth = 2;
+            context.strokeRect(roi.x * scaleX, roi.y * scaleY, roi.w * scaleX, roi.h * scaleY);
+          });
+          context.fillStyle = "rgba(15,23,42,.82)";
+          context.fillRect(lane.band.x * scaleX, Math.max(0, lane.band.y * scaleY - 18), 25, 17);
+          context.fillStyle = "#fff";
+          context.font = "700 12px Arial";
+          context.textAlign = "center";
+          context.fillText(String(index + 1), lane.band.x * scaleX + 12.5, Math.max(12, lane.band.y * scaleY - 5));
+        });
+      }
+
+      function grayReaderQc(codes) {
+        const labels = {
+          POLARITY_OR_SIGNAL_INVALID: "极性/信号无效",
+          SIGNAL_SATURATION_HIGH: "条带饱和≥1%",
+          BACKGROUND_CLIPPING_HIGH: "背景裁切≥1%",
+          SIGNAL_ENDPOINT_PRESENT: "条带有端点像素",
+          BACKGROUND_ENDPOINT_PRESENT: "背景有端点像素",
+        };
+        return (codes || []).map((code) => labels[code] || code).join("; ") || "—";
+      }
+
+      function renderGrayReaderResults() {
+        const container = $("#grayReaderResults");
+        const ready = grayReader.measurements.length > 0;
+        $("#copyGrayReaderValues").disabled = !ready;
+        $("#downloadGrayReaderCsv").disabled = !ready;
+        if (!ready) {
+          container.innerHTML = '<p class="field-help" style="padding:10px">结果会显示在这里。</p>';
+          return;
+        }
+        container.innerHTML = `<table><thead><tr><th>泳道</th><th>背景校正灰度（作图用）</th><th>QC</th></tr></thead><tbody>${grayReader.measurements.map((measurement, index) => `<tr><td>${index + 1}</td><td>${Number(measurement.corrected).toFixed(1)}</td><td>${xml(grayReaderQc(measurement.qc))}</td></tr>`).join("")}</tbody></table>`;
+      }
+
+      function clearGrayReaderMeasurement(message) {
+        grayReader.drag = null;
+        grayReader.rois = null;
+        grayReader.measurements = [];
+        renderGrayReaderResults();
+        paintGrayReader();
+        if (message) $("#grayReaderStatus").textContent = message;
+      }
+
+      async function loadGrayReaderFile(file) {
+        const token = ++grayReaderLoadToken;
+        grayReader = { file: null, sha256: "", decoded: null, sourceCanvas: null, drag: null, rois: null, measurements: [] };
+        $("#grayReaderFileName").textContent = `正在读取 ${file.name}…`;
+        $("#grayReaderFileName").title = file.name;
+        clearGrayReaderMeasurement("正在读取 TIFF…");
+        try {
+          const decoded = await decodeQuantFile(file);
+          const sha256 = await sha256Blob(file);
+          if (token !== grayReaderLoadToken) return;
+          grayReader = { file, sha256, decoded, sourceCanvas: grayReaderSourceCanvas(decoded), drag: null, rois: null, measurements: [] };
+          $("#grayReaderFileName").textContent = `${file.name} · ${decoded.width} × ${decoded.height} px`;
+          $("#grayReaderFileName").title = file.name;
+          clearGrayReaderMeasurement("从第一道左边缘横向拖到最后一道右边缘，线放在条带中心。松开即算。");
+        } catch (error) {
+          if (token !== grayReaderLoadToken) return;
+          $("#grayReaderFileName").textContent = `${file.name} 读取失败`;
+          $("#grayReaderStatus").textContent = `未读取：${error.message}`;
+          toast(error.message);
+        }
+      }
+
+      function calculateGrayReaderLine(start, end) {
+        if (!grayReader.decoded) return;
+        try {
+          const laneCount = grayReaderLaneCount();
+          const left = Math.round(Math.min(start.x, end.x));
+          const right = Math.round(Math.max(start.x, end.x));
+          if (right - left < laneCount * 3) throw new Error("横线太短；请从第一道左边缘拉到最后一道右边缘");
+          const bandCenterY = (start.y + end.y) / 2;
+          const roiHeight = grayReaderRoiHeight();
+          if (roiHeight > grayReader.decoded.height - 4) throw new Error(`ROI 高度不能超过 ${Math.max(2, grayReader.decoded.height - 4)} px`);
+          const polarity = $("#grayReaderPolarity").value === "bright" ? "bright" : "dark";
+          const placed = window.WBCore.laneRoisAtBandCenter({
+            pixels: grayReader.decoded.pixels,
+            width: grayReader.decoded.width,
+            height: grayReader.decoded.height,
+            crop: { x: left, y: 0, w: right - left, h: grayReader.decoded.height },
+            laneCount,
+            polarity,
+            bandCenterY,
+            roiHeight,
+          });
+          const measurements = placed.lanes.map((lane) => window.WBCore.quantifyRoiPair({
+            pixels: grayReader.decoded.pixels,
+            width: grayReader.decoded.width,
+            height: grayReader.decoded.height,
+            band: lane.band,
+            background: lane.background,
+            polarity,
+          }));
+          grayReader.rois = placed.lanes;
+          grayReader.measurements = measurements;
+          $("#grayReaderStatus").textContent = `已读取 ${laneCount} 条泳道 · ROI 高 ${roiHeight} px；直接复制两列，或下载完整 CSV。`;
+          renderGrayReaderResults();
+          if (matchMedia("(max-width: 760px)").matches) $("#grayReaderResults").scrollIntoView({ behavior: "smooth", block: "nearest" });
+        } catch (error) {
+          grayReader.rois = null;
+          grayReader.measurements = [];
+          renderGrayReaderResults();
+          $("#grayReaderStatus").textContent = `未计算：${error.message}`;
+          toast(error.message);
+        }
+        grayReader.drag = null;
+        paintGrayReader();
+      }
+
+      function grayReaderCsvRows() {
+        const polarity = $("#grayReaderPolarity").value === "bright" ? "bright" : "dark";
+        const exportedAt = new Date().toISOString();
+        return [["engine_version", "exported_at_utc", "source_file", "source_sha256", "image_width_px", "image_height_px", "lane", "polarity", "roi_method", "band_x", "band_y", "band_w", "band_h", "background_x", "background_y", "background_w", "background_h", "band_sum", "band_mean", "fiji_intden_unsubtracted", "background_sum", "background_mean", "background_sd", "corrected_intensity", "signal_clipped_fraction", "background_clipped_fraction", "qc_codes"], ...grayReader.measurements.map((measurement, index) => [
+          window.WBCore.ENGINE_VERSION, exportedAt, grayReader.file?.name || "", grayReader.sha256, grayReader.decoded.width, grayReader.decoded.height, index + 1, polarity, "manual-horizontal-line-v1",
+          measurement.band.x, measurement.band.y, measurement.band.w, measurement.band.h,
+          measurement.background.x, measurement.background.y, measurement.background.w, measurement.background.h,
+          measurement.bandSum, measurement.bandMean, measurement.fijiIntDen, measurement.backgroundSum, measurement.backgroundMean, measurement.backgroundSd, measurement.corrected,
+          measurement.signalClippedFraction, measurement.backgroundClippedFraction, (measurement.qc || []).join(";"),
+        ])];
+      }
+
+      async function copyGrayReaderValues() {
+        if (!grayReader.measurements.length) return;
+        const text = ["lane\tcorrected_intensity", ...grayReader.measurements.map((measurement, index) => `${index + 1}\t${measurement.corrected}`)].join("\n");
+        try {
+          await navigator.clipboard.writeText(text);
+          toast("已复制泳道号和背景校正灰度，可直接粘贴到 Excel 或 Prism");
+        } catch {
+          toast("浏览器未允许复制，请下载灰度 CSV");
+        }
+      }
+
+      function downloadGrayReaderCsv() {
+        if (!grayReader.measurements.length) return;
+        const stem = safeFilePart((grayReader.file?.name || "WB").replace(/\.tiff?$/i, ""));
+        downloadBlob(new Blob([rowsToCsv(grayReaderCsvRows())], { type: "text/csv;charset=utf-8" }), `${stem}-gray-values.csv`);
+      }
+
+      function openGrayReader() {
+        $("#grayReaderDialog").showModal();
+        paintGrayReader();
       }
 
       function defaultSampleMap() {
@@ -5313,6 +5563,7 @@
       $("#copyPng").addEventListener("click", copyPng);
       $("#pngDpi").addEventListener("change", (event) => { state.pngDpi = Number(event.target.value) === 600 ? 600 : 300; markDirty(); });
       $("#journalProfile").addEventListener("change", (event) => { state.exportProfile = JOURNAL_PROFILES[event.target.value] ? event.target.value : "preserve"; markDirty(); });
+      document.querySelectorAll("#openGrayReader,[data-open-gray-reader]").forEach((button) => button.addEventListener("click", openGrayReader));
       $("#openPreflight").addEventListener("click", openPreflight);
       $("#downloadPreflight").addEventListener("click", downloadPreflightReport);
       $("#openQuant").addEventListener("click", openQuant);
@@ -5335,6 +5586,45 @@
       $("#redoAction").addEventListener("click", redo);
 
       document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => $("#" + button.dataset.closeDialog).close()));
+
+      $("#chooseGrayReaderFile").addEventListener("click", () => $("#grayReaderFile").click());
+      $("#grayReaderFile").addEventListener("change", async (event) => {
+        const file = event.target.files[0];
+        event.target.value = "";
+        if (!file) return;
+        await loadGrayReaderFile(file);
+      });
+      ["#grayReaderLaneCount", "#grayReaderRoiHeight"].forEach((selector) => $(selector).addEventListener("input", () => {
+        if (grayReader.decoded) clearGrayReaderMeasurement("设置已改变，请重新横向拉线。");
+      }));
+      $("#grayReaderPolarity").addEventListener("change", () => {
+        if (grayReader.decoded) clearGrayReaderMeasurement("设置已改变，请重新横向拉线。");
+      });
+      $("#copyGrayReaderValues").addEventListener("click", copyGrayReaderValues);
+      $("#downloadGrayReaderCsv").addEventListener("click", downloadGrayReaderCsv);
+      $("#grayReaderCanvas").addEventListener("pointerdown", (event) => {
+        if (!grayReader.decoded) return toast("请先选择原始 TIFF");
+        const point = grayReaderPoint(event);
+        grayReader.drag = { pointerId: event.pointerId, start: point, end: point };
+        event.currentTarget.setPointerCapture(event.pointerId);
+        paintGrayReader();
+      });
+      $("#grayReaderCanvas").addEventListener("pointermove", (event) => {
+        if (!grayReader.drag || grayReader.drag.pointerId !== event.pointerId) return;
+        grayReader.drag.end = grayReaderPoint(event);
+        paintGrayReader();
+      });
+      $("#grayReaderCanvas").addEventListener("pointerup", (event) => {
+        if (!grayReader.drag || grayReader.drag.pointerId !== event.pointerId) return;
+        grayReader.drag.end = grayReaderPoint(event);
+        const { start, end } = grayReader.drag;
+        calculateGrayReaderLine(start, end);
+      });
+      $("#grayReaderCanvas").addEventListener("pointercancel", (event) => {
+        if (grayReader.drag?.pointerId !== event.pointerId) return;
+        grayReader.drag = null;
+        paintGrayReader();
+      });
 
       $("#quantNormalizationMode").addEventListener("change", async (event) => {
         state.quant.normalizationMode = event.target.value === "paired-band" ? "paired-band" : "loading";

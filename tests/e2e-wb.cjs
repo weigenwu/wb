@@ -64,11 +64,13 @@ async function waitForServer(url) {
   const exposureShort = path.join(fixtureDir, "Loading_short.tif");
   const exposureLong = path.join(fixtureDir, "Loading_long.tif");
   const cleavage = path.join(fixtureDir, "GSDMB_cleavage.tif");
+  const invalidTiff = path.join(fixtureDir, "invalid.tif");
   const loadingBytes = grayTiff(300, 100, [120, 120, 120]);
   fs.writeFileSync(loading, loadingBytes);
   fs.writeFileSync(target, grayTiff(300, 100, [80, 160, 240]));
   fs.writeFileSync(exposureShort, grayTiff(300, 100, [70, 70, 70]));
   fs.writeFileSync(exposureLong, grayTiff(300, 100, [220, 220, 220]));
+  fs.writeFileSync(invalidTiff, "not a TIFF");
   fs.writeFileSync(cleavage, grayTiff(300, 120, [90, 140, 190], [
     { y1: 22, y2: 36, values: [90, 140, 190] },
     { y1: 76, y2: 90, values: [180, 150, 120] },
@@ -103,6 +105,43 @@ async function waitForServer(url) {
     page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${port}/#studio`, { waitUntil: "networkidle" });
+
+    await page.locator("[data-open-gray-reader]").click();
+    await page.locator("#grayReaderDialog").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#grayReaderDialog #sampleMapImport,#grayReaderDialog #calculateQuant,#grayReaderDialog #quantPlot,#grayReaderDialog #exportPrism").count(), 0, "quick grayscale reading must stay independent of mapping, normalization, and plotting");
+    await page.locator("#grayReaderFile").setInputFiles(target);
+    await page.locator("#grayReaderLaneCount").fill("3");
+    await page.locator("#grayReaderPolarity").selectOption("bright");
+    await page.waitForFunction(() => document.querySelector("#grayReaderCanvas")?.width === 900);
+    const grayCanvas = page.locator("#grayReaderCanvas");
+    const grayBox = await grayCanvas.boundingBox();
+    assert.ok(grayBox, "quick grayscale canvas must be visible");
+    const grayY = grayBox.y + grayBox.height * 73 / 100;
+    await page.mouse.move(grayBox.x + .1, grayY);
+    await page.mouse.down();
+    await page.mouse.move(grayBox.x + grayBox.width - .1, grayY);
+    await page.mouse.up();
+    await page.waitForFunction(() => document.querySelectorAll("#grayReaderResults tbody tr").length === 3);
+    const quickCorrected = await page.locator("#grayReaderResults tbody tr").evaluateAll((rows) => rows.map((row) => Number(row.cells[1].textContent)));
+    assert.deepEqual(quickCorrected, [48960, 114240, 179520], "one horizontal drag must return exact background-corrected values for the requested lanes");
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: `http://127.0.0.1:${port}` });
+    await page.locator("#copyGrayReaderValues").click();
+    assert.equal((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, "\n"), "lane\tcorrected_intensity\n1\t48960\n2\t114240\n3\t179520");
+    const grayCsvDownload = page.waitForEvent("download");
+    await page.locator("#downloadGrayReaderCsv").click();
+    const grayCsv = fs.readFileSync(await (await grayCsvDownload).path(), "utf8");
+    assert.match(grayCsv, /"corrected_intensity"/);
+    assert.match(grayCsv, /"fiji_intden_unsubtracted"/);
+    assert.match(grayCsv, /"manual-horizontal-line-v1"/);
+    assert.match(grayCsv, /,"1","bright".*?,"48960",/);
+    assert.doesNotMatch(grayCsv, /sample_id|fold_change|loading_control/i);
+    await page.locator("#grayReaderFile").setInputFiles(invalidTiff);
+    await page.waitForFunction(() => document.querySelector("#grayReaderFileName")?.textContent.includes("读取失败"));
+    assert.equal(await page.locator("#grayReaderResults tbody tr").count(), 0, "a failed replacement TIFF must clear old grayscale values");
+    assert.ok(await page.locator("#copyGrayReaderValues").isDisabled());
+    assert.ok(await page.locator("#downloadGrayReaderCsv").isDisabled());
+    await page.locator('[data-close-dialog="grayReaderDialog"]').click();
+
     await page.locator("#projectFile").setInputFiles(legacyProject);
     await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 1);
     assert.equal(await page.locator("#rowList .protein-row-top input").first().inputValue(), "Legacy target");
@@ -591,7 +630,7 @@ async function waitForServer(url) {
     assert.ok(mobileShell.studioVisible, "#studio must land below the sticky header and inside the viewport");
     if (process.env.E2E_SCREENSHOT) await page.screenshot({ path: process.env.E2E_SCREENSHOT, fullPage: true });
     assert.deepEqual(errors, []);
-    console.log("WB browser E2E passed: sample-map import, assisted/line-guide ROI, loading and paired-band N/FL quantification, Prism and compliance package.");
+    console.log("WB browser E2E passed: standalone one-line grayscale reader, sample-map import, loading and paired-band N/FL quantification, Prism and compliance package.");
   } finally {
     if (browser) await browser.close();
     server.kill();
