@@ -598,15 +598,22 @@
               </button>
               <button class="hierarchy-option" id="nestedLevelMode" type="button" aria-pressed="false">
                 <strong>双层组图</strong>
-                <span>细胞系内再分来源大组</span>
+                <span>大组横线＋每泳道条件 + / −</span>
               </button>
             </div>
             <label class="caption" id="groupInputCaption" for="groupInput">实验组名称与样本数</label>
             <textarea id="groupInput" spellcheck="false">Control × 1, Group 1 × 1, Group 2 × 1</textarea>
             <p class="field-help" id="groupInputHelp">格式示例：Control × 3, Drug × 3；最多 24 个样本。</p>
-            <label class="caption" id="laneLabelCaption" for="laneLabelInput" style="margin-top:14px">泳道标签（可选）</label>
-            <textarea id="laneLabelInput" spellcheck="false" placeholder="例如 Control, Group 1, Group 2"></textarea>
-            <p class="field-help" id="laneLabelHelp">逗号分隔，数量须与总样本数一致；留空会自动生成。</p>
+            <div id="laneLabelFields">
+              <label class="caption" id="laneLabelCaption" for="laneLabelInput" style="margin-top:14px">泳道标签（可选）</label>
+              <textarea id="laneLabelInput" spellcheck="false" placeholder="例如 Control, Group 1, Group 2"></textarea>
+              <p class="field-help" id="laneLabelHelp">逗号分隔，数量须与总样本数一致；留空会自动生成。</p>
+            </div>
+            <div id="conditionMatrixFields" hidden>
+              <label class="caption" for="conditionMatrixInput" style="margin-top:14px">处理条件矩阵（可选）</label>
+              <textarea id="conditionMatrixInput" spellcheck="false" placeholder="处理条件 A: −, +, −, +&#10;处理条件 B: −, −, +, +"></textarea>
+              <p class="field-help" id="conditionMatrixHelp">每行写“条件名: 每个泳道的 + / − / 空白”；符号数量必须与总泳道数一致。留空时只显示顶部大组，不再显示倾斜的组合标签。</p>
+            </div>
             <div class="inline-actions">
               <button class="button small primary" id="applyGroups" type="button">应用分组与标签</button>
               <button class="button small" id="loadDemo" type="button">恢复示例</button>
@@ -897,8 +904,8 @@
       const MAX_PIXELS = 50_000_000;
       const MAX_PROJECT_FILE_BYTES = 162 * 1024 * 1024;
       const PROJECT_KIND = "blotboard-project";
-      const PROJECT_VERSION = 5;
-      const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, 4, PROJECT_VERSION];
+      const PROJECT_VERSION = 6;
+      const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, 4, 5, PROJECT_VERSION];
       const PROJECT_DB = "blotboard-wb";
       const PROJECT_STORE = "projects";
       const AUTOSAVE_KEY = "current";
@@ -920,6 +927,7 @@
         layoutMode: "compact",
         footerLabel: "Cell line",
         showGroupBrackets: false,
+        conditionRows: [],
         laneWidth: 40,
         rowHeight: 40,
         rowGap: 7,
@@ -978,6 +986,10 @@
         };
       }
 
+      function cloneConditionRows(rows = []) {
+        return rows.map((row) => ({ name: row.name, values: [...row.values] }));
+      }
+
       function runtimeSnapshot() {
         return {
           projectId: state.projectId,
@@ -988,6 +1000,7 @@
           layoutMode: state.layoutMode,
           footerLabel: state.footerLabel,
           showGroupBrackets: state.showGroupBrackets,
+          conditionRows: cloneConditionRows(state.conditionRows),
           laneWidth: state.laneWidth,
           rowHeight: state.rowHeight,
           rowGap: state.rowGap,
@@ -1008,6 +1021,7 @@
       function syncWorkspaceFromState() {
         $("#groupInput").value = groupsToText(state.groups);
         $("#laneLabelInput").value = laneLabelsToText(state.laneLabels);
+        $("#conditionMatrixInput").value = window.WBCore.conditionMatrixToText(state.conditionRows);
         syncLayoutControls();
         renderGroupSummary();
         renderRows();
@@ -1033,6 +1047,7 @@
           layoutMode: snapshot.layoutMode,
           footerLabel: snapshot.footerLabel,
           showGroupBrackets: snapshot.showGroupBrackets ?? false,
+          conditionRows: cloneConditionRows(snapshot.conditionRows),
           laneWidth: snapshot.laneWidth,
           rowHeight: snapshot.rowHeight,
           rowGap: snapshot.rowGap,
@@ -1215,6 +1230,10 @@
         return state.laneLabels.length === totalSamples() ? state.laneLabels : defaultLaneLabels(state.groups);
       }
 
+      function conditionMatrixActive() {
+        return state.showGroupBrackets;
+      }
+
       function syncLayoutControls() {
         $("#layoutMode").value = state.layoutMode;
         $("#footerLabel").value = state.footerLabel;
@@ -1237,14 +1256,15 @@
         const nested = state.showGroupBrackets;
         $("#singleLevelMode").setAttribute("aria-pressed", String(!nested));
         $("#nestedLevelMode").setAttribute("aria-pressed", String(nested));
+        $("#laneLabelFields").hidden = nested;
+        $("#conditionMatrixFields").hidden = !nested;
         $("#groupInputCaption").textContent = nested ? "顶部来源大组与泳道数" : "实验组名称与样本数";
         $("#groupInputHelp").textContent = nested
           ? "格式示例：NK × 2, WT × 4, OE × 4；每个大组的数量应覆盖对应泳道。"
           : "格式示例：Control × 3, Drug × 3；适合同一细胞系内直接比较。";
-        $("#laneLabelCaption").textContent = nested ? "每条泳道标签" : "泳道标签（可选）";
-        $("#laneLabelHelp").textContent = nested
-          ? "按泳道顺序填写，例如 NK, NK+H, WT, WT+H；数量须与总泳道数一致。"
-          : "逗号分隔，数量须与总样本数一致；留空会自动生成。";
+        $("#laneLabelCaption").textContent = "泳道标签（可选）";
+        $("#laneLabelHelp").textContent = "逗号分隔，数量须与总样本数一致；留空会自动生成。";
+        $("#applyGroups").textContent = nested ? "应用分组与条件矩阵" : "应用分组与标签";
       }
 
       function syncLaneToggleAvailability() {
@@ -1449,6 +1469,7 @@
         state.layoutMode = "compact";
         state.footerLabel = "Cell line";
         state.showGroupBrackets = false;
+        state.conditionRows = [];
         state.laneWidth = 40;
         state.rowHeight = 40;
         state.rowGap = 7;
@@ -1493,6 +1514,7 @@
         }));
         $("#groupInput").value = groupsToText(state.groups);
         $("#laneLabelInput").value = "";
+        $("#conditionMatrixInput").value = "";
         syncLayoutControls();
         renderGroupSummary();
         renderRows();
@@ -1516,6 +1538,7 @@
           || state.layoutMode !== "compact"
           || state.footerLabel !== "Cell line"
           || state.showGroupBrackets
+          || state.conditionRows.length > 0
           || state.laneWidth !== 40
           || state.rowHeight !== 40
           || state.rowGap !== 7
@@ -1542,6 +1565,7 @@
         state.dirty = false;
         $("#groupInput").value = groupsToText(state.groups);
         $("#laneLabelInput").value = "";
+        $("#conditionMatrixInput").value = "";
         syncLayoutControls();
         renderGroupSummary();
         renderRows();
@@ -1788,10 +1812,13 @@
 
       function geometry() {
         const compact = state.layoutMode === "compact";
+        const matrixActive = conditionMatrixActive();
         const longestName = Math.max(0, ...state.rows.map((row) => measuredWidth(row.name, state.labelSize)));
+        const longestCondition = matrixActive ? Math.max(0, ...state.conditionRows.map((row) => measuredWidth(row.name, state.labelSize, 500))) : 0;
         const mwSize = compact ? state.labelSize : Math.max(12, state.labelSize - 3);
         const longestMw = Math.max(0, ...state.rows.map((row) => measuredWidth(row.mw, mwSize, compact ? 700 : 500)));
-        const left = Math.min(compact ? 240 : 360, Math.max(compact ? 105 : 166, Math.ceil(longestName + (compact ? 28 : 34))));
+        const leftContent = Math.max(longestName, longestCondition);
+        const left = Math.min(compact ? 240 : 360, Math.max(compact ? 105 : 166, Math.ceil(leftContent + (compact ? 28 : 34))));
         const right = state.showMw ? Math.min(compact ? 190 : 220, Math.max(compact ? 83 : 116, Math.ceil(longestMw + (compact ? 30 : 34)))) : 24;
         const longestLaneLabel = Math.max(0, ...resolvedLaneLabels().map((label) => measuredWidth(label, state.labelSize)));
         const bandWidth = totalSamples() * state.rowHeight;
@@ -1803,18 +1830,25 @@
         ) : 0;
         const groupAngles = compact ? [] : state.groups.map((group) => fullLabelAngle(group.name, group.count * state.rowHeight, state.labelSize));
         const groupTop = state.groups.reduce((maximum, group, index) => Math.max(maximum, measuredWidth(group.name, state.labelSize) * Math.sin(groupAngles[index] || 0)), 0);
-        const topGroups = compact && state.showGroupBrackets && state.groups.length > 1 && totalSamples() > 1;
+        const topGroups = matrixActive || (compact && state.showGroupBrackets && state.groups.length > 1 && totalSamples() > 1);
         const baseTop = compact ? Math.max(72, Math.ceil(longestLaneLabel * Math.sin(labelAngle) + state.labelSize + 18)) : Math.max(82, Math.ceil(groupTop + state.labelSize + 42));
         const topGroupLabelY = Math.max(12, Math.ceil(state.labelSize * .75));
         const topGroupLineY = topGroupLabelY + Math.max(14, Math.ceil(state.labelSize * .9));
-        const top = baseTop + (topGroups ? topGroupLineY + 8 : 0);
+        const matrixRowStep = Math.max(22, Math.ceil(state.labelSize * 1.45));
+        const matrixFirstRowY = topGroupLineY + Math.max(20, Math.ceil(state.labelSize * 1.3));
+        const matrixLastRowY = state.conditionRows.length
+          ? matrixFirstRowY + (state.conditionRows.length - 1) * matrixRowStep
+          : topGroupLineY;
+        const top = matrixActive
+          ? matrixLastRowY + (state.conditionRows.length ? Math.max(22, Math.ceil(state.labelSize * 1.35)) : 18)
+          : baseTop + (topGroups ? topGroupLineY + 8 : 0);
         const rowCount = Math.max(1, state.rows.length);
         const contentBottom = top + rowCount * state.rowHeight + Math.max(0, rowCount - 1) * state.rowGap;
         const footerLineY = contentBottom + 14;
         const footerLabelY = footerLineY + 23;
         const bottom = compact && state.footerLabel.trim() ? 86 : (state.showLanes ? 55 : 28);
         const height = contentBottom + bottom;
-        return { width, height, left, right, top, bottom, bandWidth, contentBottom, topGroups, topGroupLineY, topGroupLabelY, footerLineY, footerLabelY, labelAngle, groupAngles };
+        return { width, height, left, right, top, bottom, bandWidth, contentBottom, topGroups, topGroupLineY, topGroupLabelY, matrixActive, matrixFirstRowY, matrixRowStep, footerLineY, footerLabelY, labelAngle, groupAngles };
       }
 
       function drawContainedImage(ctx, row, x, y, width, height) {
@@ -1884,7 +1918,42 @@
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillStyle = "#111827";
-        if (compact) {
+        if (g.matrixActive) {
+          let laneOffset = 0;
+          ctx.strokeStyle = "#111827";
+          ctx.fillStyle = "#111827";
+          ctx.textAlign = "center";
+          state.groups.forEach((group) => {
+            const start = g.left + laneOffset * laneWidth;
+            const end = start + group.count * laneWidth;
+            const span = end - start;
+            const inset = Math.min(7, span * .1);
+            ctx.lineCap = "round";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(start + inset, g.topGroupLineY);
+            ctx.lineTo(end - inset, g.topGroupLineY);
+            ctx.stroke();
+            const label = fittedLabel(group.name, Math.max(1, span - 6), state.labelSize, 700);
+            ctx.font = `700 ${label.size}px Arial, "Microsoft YaHei", sans-serif`;
+            ctx.fillText(label.text, (start + end) / 2, g.topGroupLabelY);
+            laneOffset += group.count;
+          });
+          ctx.lineCap = "butt";
+          state.conditionRows.forEach((row, rowIndex) => {
+            const y = g.matrixFirstRowY + rowIndex * g.matrixRowStep;
+            const rowLabel = fittedLabel(row.name, g.left - 30, state.labelSize, 500);
+            ctx.fillStyle = "#111827";
+            ctx.font = `500 ${rowLabel.size}px Arial, "Microsoft YaHei", sans-serif`;
+            ctx.textAlign = "right";
+            ctx.fillText(rowLabel.text, g.left - 18, y);
+            ctx.font = `700 ${state.labelSize}px Arial, "Microsoft YaHei", sans-serif`;
+            ctx.textAlign = "center";
+            row.values.forEach((value, lane) => {
+              if (value) ctx.fillText(value, g.left + (lane + .5) * laneWidth, y);
+            });
+          });
+        } else if (compact) {
           if (g.topGroups) {
             let laneOffset = 0;
             ctx.strokeStyle = "#111827";
@@ -2220,7 +2289,27 @@
         const heightCm = widthCm * g.height / g.width;
         const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${widthCm.toFixed(4)}cm" height="${heightCm.toFixed(4)}cm" viewBox="0 0 ${g.width} ${g.height}">`, `<rect width="100%" height="100%" fill="white"/>`];
         const compact = state.layoutMode === "compact";
-        if (compact) {
+        if (g.matrixActive) {
+          let laneOffset = 0;
+          state.groups.forEach((group) => {
+            const start = g.left + laneOffset * laneWidth;
+            const end = start + group.count * laneWidth;
+            const span = end - start;
+            const inset = Math.min(7, span * .1);
+            const label = fittedLabel(group.name, Math.max(1, span - 6), state.labelSize, 700);
+            parts.push(`<line data-role="group-underline" x1="${start + inset}" y1="${g.topGroupLineY}" x2="${end - inset}" y2="${g.topGroupLineY}" stroke="#111827" stroke-width="4" stroke-linecap="round"/>`);
+            parts.push(`<text data-role="group-label" x="${(start + end) / 2}" y="${g.topGroupLabelY}" dominant-baseline="middle" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${label.size}" font-weight="700" fill="#111827">${xml(label.text)}</text>`);
+            laneOffset += group.count;
+          });
+          state.conditionRows.forEach((row, rowIndex) => {
+            const y = g.matrixFirstRowY + rowIndex * g.matrixRowStep;
+            const rowLabel = fittedLabel(row.name, g.left - 30, state.labelSize, 500);
+            parts.push(`<text data-role="condition-label" x="${g.left - 18}" y="${y}" dominant-baseline="middle" text-anchor="end" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${rowLabel.size}" font-weight="500" fill="#111827">${xml(rowLabel.text)}</text>`);
+            row.values.forEach((value, lane) => {
+              if (value) parts.push(`<text data-role="condition-value" x="${g.left + (lane + .5) * laneWidth}" y="${y}" dominant-baseline="middle" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${state.labelSize}" font-weight="700" fill="#111827">${xml(value)}</text>`);
+            });
+          });
+        } else if (compact) {
           if (g.topGroups) {
             let laneOffset = 0;
             state.groups.forEach((group) => {
@@ -2237,7 +2326,7 @@
           resolvedLaneLabels().forEach((value, lane) => {
             const x = g.left + lane * laneWidth + Math.min(6, laneWidth * .15);
             const y = g.top - 8;
-            parts.push(`<text transform="translate(${x} ${y}) rotate(${-g.labelAngle * 180 / Math.PI})" text-anchor="start" dominant-baseline="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${state.labelSize}" font-weight="700" fill="#111827">${xml(value)}</text>`);
+            parts.push(`<text data-role="lane-label" transform="translate(${x} ${y}) rotate(${-g.labelAngle * 180 / Math.PI})" text-anchor="start" dominant-baseline="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${state.labelSize}" font-weight="700" fill="#111827">${xml(value)}</text>`);
           });
         } else {
           let laneOffset = 0;
@@ -2473,6 +2562,7 @@
             figure: { stem: artifactStem(), dpi: state.pngDpi, profile: state.exportProfile, metrics: currentFigureMetrics() },
             groups: state.groups,
             lane_labels: resolvedLaneLabels(),
+            condition_rows: cloneConditionRows(state.conditionRows),
             rows: state.rows.map((row, index) => ({ order: index + 1, row_key: row.rowKey, protein: row.name, molecular_weight: row.mw, role: row.role, membrane_id: row.membraneId, source_file: row.sourceName, source_sha256: row.sourceSha256, splices: row.splices || [], crop: row.crop, brightness: row.brightness, contrast: row.contrast, background_clean: row.backgroundClean || 0, rotation_degrees: row.rotation || 0, invert: row.invert })),
             panels: state.panels.map((panel, index) => ({ order: index + 1, key: panel.key, type: panel.type, label: panel.label, source_file: panel.sourceFile?.name || "current WB figure" })),
             preflight: report,
@@ -2991,7 +3081,10 @@
         if (!laneCountChanged && groupsChanged && state.quant.locked && !confirm("成图分组已变化；将同步修改逐泳道定量组别、解锁样本映射并清除旧结果。继续吗？")) return false;
         state.groups = nextGroups;
         state.laneLabels = nextLaneLabels;
-        if (laneCountChanged) invalidateQuantForSampleLayout(previousSequence.length);
+        if (laneCountChanged) {
+          state.conditionRows = [];
+          invalidateQuantForSampleLayout(previousSequence.length);
+        }
         else if (groupsChanged) {
           if (state.quant.sampleMap.length === nextSequence.length) state.quant.sampleMap.forEach((sample, index) => { sample.group = nextSequence[index]; });
           state.quant.locked = false;
@@ -3128,11 +3221,13 @@
         const previousLaneCount = totalSamples();
         state.groups = groups;
         state.laneLabels = laneLabels;
+        state.conditionRows = [];
         state.quant.sampleMap = sampleMap;
         state.quant.controlGroup = uniqueGroupNames().includes(state.quant.controlGroup) ? state.quant.controlGroup : sampleMap[0].group;
         invalidateQuantForSampleLayout(previousLaneCount, false);
         $("#groupInput").value = groupsToText(state.groups);
         $("#laneLabelInput").value = laneLabelsToText(state.laneLabels);
+        $("#conditionMatrixInput").value = "";
         renderGroupSummary();
         syncQuantSelectors();
         renderSampleMap();
@@ -4566,10 +4661,11 @@
 
       function layoutTemplate() {
         return {
-          version: 1,
+          version: 2,
           savedAt: new Date().toISOString(),
           groups: state.groups,
           laneLabels: state.laneLabels,
+          conditionRows: cloneConditionRows(state.conditionRows),
           layoutMode: state.layoutMode,
           footerLabel: state.footerLabel,
           showGroupBrackets: state.showGroupBrackets,
@@ -4599,10 +4695,12 @@
           const templateLaneCount = templateGroups.reduce((sum, group) => sum + group.count, 0);
           if (templateLaneCount > 24) throw new Error("模板样本数超过 24");
           const templateLaneLabels = Array.isArray(template.laneLabels) && template.laneLabels.length === templateLaneCount ? template.laneLabels.map((label) => String(label).slice(0, 40)) : defaultLaneLabels(templateGroups);
+          const templateConditionRows = Array.isArray(template.conditionRows) && template.conditionRows.length ? window.WBCore.normalizeConditionRows(template.conditionRows, templateLaneCount) : [];
           if (!applySampleLayout(templateGroups, templateLaneLabels)) return false;
           state.layoutMode = ["compact", "groups"].includes(template.layoutMode) ? template.layoutMode : "compact";
           state.footerLabel = String(template.footerLabel || "").slice(0, 40);
           state.showGroupBrackets = Boolean(template.showGroupBrackets);
+          state.conditionRows = cloneConditionRows(templateConditionRows);
           state.laneWidth = Math.max(28, Math.min(130, Number(template.laneWidth) || 40));
           state.rowHeight = state.laneWidth;
           state.rowGap = Math.max(0, Math.min(48, Number(template.rowGap) || 0));
@@ -4797,6 +4895,7 @@
             layoutMode: state.layoutMode,
             footerLabel: state.footerLabel,
             showGroupBrackets: state.showGroupBrackets,
+            conditionRows: cloneConditionRows(state.conditionRows),
             laneWidth: state.laneWidth,
             rowHeight: state.rowHeight,
             rowGap: state.rowGap,
@@ -4962,12 +5061,14 @@
         if (!Array.isArray(settings.laneLabels) || settings.laneLabels.length !== laneCount || settings.laneLabels.some((label) => typeof label !== "string" || label.length > 40)) throw new Error("项目中的泳道标签无效");
         if (!["compact", "groups"].includes(settings.layoutMode)) throw new Error("项目中的版式无效");
         if (typeof settings.footerLabel !== "string" || settings.footerLabel.length > 40) throw new Error("项目中的底部说明无效");
+        if (project.version >= 6 && !Array.isArray(settings.conditionRows)) throw new Error("项目中的处理条件矩阵无效");
         const normalizedSettings = {
           groups,
           laneLabels: [...settings.laneLabels],
           layoutMode: settings.layoutMode,
           footerLabel: settings.footerLabel,
           showGroupBrackets: project.version >= 3 ? booleanValue(settings.showGroupBrackets, "顶部来源分组开关") : false,
+          conditionRows: project.version >= 6 && settings.conditionRows.length ? window.WBCore.normalizeConditionRows(settings.conditionRows, laneCount) : [],
           laneWidth: finiteInRange(settings.laneWidth, 28, 130, "泳道宽度"),
           rowHeight: finiteInRange(settings.rowHeight, 28, 130, "条带行高"),
           rowGap: finiteInRange(settings.rowGap, 0, 48, "行间距"),
@@ -5146,6 +5247,7 @@
         state.layoutMode = settings.layoutMode;
         state.footerLabel = settings.footerLabel;
         state.showGroupBrackets = settings.showGroupBrackets;
+        state.conditionRows = cloneConditionRows(settings.conditionRows);
         state.laneWidth = settings.rowHeight;
         state.rowHeight = settings.rowHeight;
         state.rowGap = settings.rowGap;
@@ -5222,7 +5324,7 @@
           ["brightness_percent", true], ["contrast_percent", true], ["background_clean_percent", true], ["rotation_degrees", true], ["inverted", false], ["layout_mode", false], ["lane_count", true],
           ["groups_json", false], ["lane_labels_json", false], ["footer_label", false], ["font_family", false], ["label_size_logical_px", true], ["label_size_pt", true], ["strip_height_cm", true],
           ["lane_width_cm", true], ["row_gap_cm", true], ["figure_width_cm", true], ["figure_height_cm", true], ["selected_png_dpi", true],
-          ["show_mw", false], ["show_lanes", false], ["show_border", false], ["show_group_brackets", false], ["row_key", false], ["quant_role", false], ["membrane_id", false], ["non_adjacent_lanes", false], ["splice_boundaries_json", false], ["export_profile", false]
+          ["show_mw", false], ["show_lanes", false], ["show_border", false], ["show_group_brackets", false], ["condition_rows_json", false], ["row_key", false], ["quant_role", false], ["membrane_id", false], ["non_adjacent_lanes", false], ["splice_boundaries_json", false], ["export_profile", false]
         ];
         const decimal = (value) => Number(Number(value).toFixed(6));
         const records = await Promise.all(state.rows.map(async (row, index) => {
@@ -5274,6 +5376,7 @@
             show_lanes: state.showLanes,
             show_border: state.showBorder,
             show_group_brackets: state.showGroupBrackets,
+            condition_rows_json: JSON.stringify(state.conditionRows),
             row_key: row.rowKey,
             quant_role: row.role,
             membrane_id: row.membraneId,
@@ -5682,14 +5785,23 @@
         try {
           const groups = parseGroups($("#groupInput").value);
           const laneLabelText = $("#laneLabelInput").value;
-          const laneLabels = parseLaneLabels(laneLabelText, groups);
+          const laneCount = groups.reduce((sum, group) => sum + group.count, 0);
+          const conditionText = $("#conditionMatrixInput").value.trim();
+          const conditionRows = state.showGroupBrackets && conditionText
+            ? window.WBCore.parseConditionMatrix(conditionText, laneCount)
+            : cloneConditionRows(state.conditionRows);
+          const laneLabels = state.showGroupBrackets
+            ? (state.laneLabels.length === laneCount ? [...state.laneLabels] : defaultLaneLabels(groups))
+            : parseLaneLabels(laneLabelText, groups);
           if (!applySampleLayout(groups, laneLabels)) return;
+          if (state.showGroupBrackets) state.conditionRows = conditionText ? conditionRows : [];
           $("#groupInput").value = groupsToText(state.groups);
           $("#laneLabelInput").value = laneLabelText.trim() ? laneLabelsToText(state.laneLabels) : "";
+          $("#conditionMatrixInput").value = window.WBCore.conditionMatrixToText(state.conditionRows);
           markDirty();
           renderGroupSummary();
           requestRender();
-          toast("样本分组与泳道标签已更新");
+          toast(state.showGroupBrackets ? "顶部大组与处理条件矩阵已更新" : "样本分组与泳道标签已更新");
         } catch (error) { toast(error.message); }
       });
       $("#loadDemo").addEventListener("click", () => {
@@ -5720,15 +5832,24 @@
       $("#footerLabel").addEventListener("input", (event) => { state.footerLabel = event.target.value; syncLaneToggleAvailability(); markDirty(); requestRender(); if (state.quant.results) renderQuantPlot(); });
       $("#compactPreset").addEventListener("click", () => {
         const laneLabelText = $("#laneLabelInput").value;
+        const conditionText = $("#conditionMatrixInput").value.trim();
         let groups;
         let laneLabels;
+        let conditionRows;
         try {
           groups = parseGroups($("#groupInput").value);
-          laneLabels = parseLaneLabels(laneLabelText, groups);
+          const laneCount = groups.reduce((sum, group) => sum + group.count, 0);
+          laneLabels = state.showGroupBrackets
+            ? (state.laneLabels.length === laneCount ? [...state.laneLabels] : defaultLaneLabels(groups))
+            : parseLaneLabels(laneLabelText, groups);
+          conditionRows = state.showGroupBrackets && conditionText
+            ? window.WBCore.parseConditionMatrix(conditionText, laneCount)
+            : cloneConditionRows(state.conditionRows);
         } catch (error) {
           return toast(error.message);
         }
         if (!applySampleLayout(groups, laneLabels)) return;
+        if (state.showGroupBrackets) state.conditionRows = conditionText ? conditionRows : [];
         state.layoutMode = "compact";
         state.footerLabel = $("#footerLabel").value.trim() || "Cell line";
         state.laneWidth = 40;
@@ -5740,6 +5861,7 @@
         state.showBorder = true;
         $("#groupInput").value = groupsToText(state.groups);
         $("#laneLabelInput").value = laneLabelText.trim() ? laneLabelsToText(state.laneLabels) : "";
+        $("#conditionMatrixInput").value = window.WBCore.conditionMatrixToText(state.conditionRows);
         syncLayoutControls();
         renderGroupSummary();
         markDirty();

@@ -122,6 +122,33 @@ function testSampleMapImport() {
   assert.throws(() => core.parseSampleMapTable('lane,sample,group,replicate\n1,"Sample, A",Control,1'), /泳道标签不能包含/);
 }
 
+function testConditionMatrix() {
+  assert.deepEqual(core.parseConditionMatrix("Treatment: -, +, -\nCo-culture: +, , ＋", 3), [
+    { name: "Treatment", values: ["−", "+", "−"] },
+    { name: "Co-culture", values: ["+", "", "+"] },
+  ]);
+  assert.deepEqual(core.parseConditionMatrix("药物：－，＋；—\n共培养：− – -", 3), [
+    { name: "药物", values: ["−", "+", "−"] },
+    { name: "共培养", values: ["−", "−", "−"] },
+  ]);
+  assert.deepEqual(core.normalizeConditionRows([{ name: "  Stimulus  ", values: [" ", "＋", "–"] }], 3), [
+    { name: "Stimulus", values: ["", "+", "−"] },
+  ]);
+
+  const rows = [{ name: "Treatment", values: ["−", "+", ""] }];
+  const text = core.conditionMatrixToText(rows);
+  assert.equal(text, "Treatment: −, +, ");
+  assert.deepEqual(core.parseConditionMatrix(text, 3), rows);
+
+  assert.throws(() => core.parseConditionMatrix("Treatment: -, +", 3), /需要 3 个泳道值/);
+  assert.throws(() => core.parseConditionMatrix("Treatment: -, ?, +", 3), /只能填写/);
+  assert.throws(() => core.parseConditionMatrix("Treatment: -, +\ntreatment: +, -", 2), /条件名不能重复/);
+  assert.throws(() => core.parseConditionMatrix("Treatment -, +", 2), /缺少冒号/);
+  assert.throws(() => core.parseConditionMatrix("", 2), /1–8 行/);
+  assert.throws(() => core.parseConditionMatrix(Array.from({ length: 9 }, (_, index) => `C${index + 1}: +`).join("\n"), 1), /1–8 行/);
+  assert.throws(() => core.parseConditionMatrix("A: +", 0), /1–24/);
+}
+
 function syntheticBands({ width = 300, height = 100, background = 200, bandValues = [80, 110, 140], bright = false } = {}) {
   const pixels = new Uint8Array(width * height).fill(background);
   const laneWidth = width / bandValues.length;
@@ -541,7 +568,7 @@ function testQc() {
 
 function testPwaShell() {
   const root = path.join(__dirname, "..");
-  assert.equal(core.ENGINE_VERSION, "2.8.0");
+  assert.equal(core.ENGINE_VERSION, "2.9.0");
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.webmanifest"), "utf8"));
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   assert.equal(manifest.name, "实验室工作台 · WB 组图与灰度");
@@ -552,8 +579,10 @@ function testPwaShell() {
   assert.match(html, /navigator\.serviceWorker\.register\("\.\/sw\.js"\)/);
   const worker = fs.readFileSync(path.join(root, "sw.js"), "utf8");
   assert.ok(worker.includes("./wb-core.js"));
-  assert.ok(worker.includes("figurelab-wb-v2.8.0"));
-  ["sampleMapText", "quantRoiHeight", "suggestRois", "exposureCheck", "downloadExposureReport", "quantPlotTarget", "exportQuantPlotPng", "editBackgroundClean", "editRotation", "autoStraighten", "quantNormalizationMode", "quantNumerator", "quantDenominator", "createCleavagePair", "guideRois", "quantQuickResults", "openGrayReader", "grayReaderFile", "grayReaderFolder", "chooseGrayReaderFolder", "previousGrayReaderFile", "nextGrayReaderFile", "grayReaderProgress", "grayReaderLaneCount", "grayReaderRoiHeight", "grayReaderCanvas", "grayReaderResults", "copyGrayReaderValues", "downloadGrayReaderCsv", "downloadGrayReaderAuditCsv"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
+  assert.ok(worker.includes("figurelab-wb-v2.9.0"));
+  ["conditionMatrixFields", "conditionMatrixInput", "conditionMatrixHelp", "sampleMapText", "quantRoiHeight", "suggestRois", "exposureCheck", "downloadExposureReport", "quantPlotTarget", "exportQuantPlotPng", "editBackgroundClean", "editRotation", "autoStraighten", "quantNormalizationMode", "quantNumerator", "quantDenominator", "createCleavagePair", "guideRois", "quantQuickResults", "openGrayReader", "grayReaderFile", "grayReaderFolder", "chooseGrayReaderFolder", "previousGrayReaderFile", "nextGrayReaderFile", "grayReaderProgress", "grayReaderLaneCount", "grayReaderRoiHeight", "grayReaderCanvas", "grayReaderResults", "copyGrayReaderValues", "downloadGrayReaderCsv", "downloadGrayReaderAuditCsv"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
+  assert.match(html, /const PROJECT_VERSION = 6;/);
+  assert.match(html, /SUPPORTED_PROJECT_VERSIONS = \[1, 2, 3, 4, 5, PROJECT_VERSION\]/);
   assert.match(html, /id="grayReaderFile"[^>]*multiple/);
   assert.match(html, /id="grayReaderFolder"[^>]*webkitdirectory/);
   assert.match(html, /window\.WBCore\.normalizeCleavageMeasurements\(/);
@@ -583,6 +612,7 @@ function testUnifiedSuiteShell() {
   testPdf,
   testXlsx,
   testSampleMapImport,
+  testConditionMatrix,
   testRoiSuggestions,
   testManualRowLineRois,
   testExposureSeries,
