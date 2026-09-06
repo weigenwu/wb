@@ -5,7 +5,7 @@
 })(typeof globalThis === "undefined" ? this : globalThis, function () {
   "use strict";
 
-  const ENGINE_VERSION = "2.8.0";
+  const ENGINE_VERSION = "2.9.0";
   const encoder = new TextEncoder();
 
   function bytes(value) {
@@ -376,6 +376,65 @@
       if (new Set(group.map((sample) => sample.technicalReplicate)).size !== group.length) throw new Error(`${group[0].group} 的生物学重复 ${group[0].biologicalReplicate} 有重复的技术重复编号`);
     });
     return samples;
+  }
+
+  function normalizedConditionValue(value, rowIndex, laneIndex) {
+    const text = String(value == null ? "" : value).trim();
+    if (!text) return "";
+    if (text === "+" || text === "＋") return "+";
+    if (/^[-−–—－]$/u.test(text)) return "−";
+    throw new Error(`第 ${rowIndex + 1} 行第 ${laneIndex + 1} 道只能填写 +、− 或留空`);
+  }
+
+  function normalizeConditionRows(rows, laneCount) {
+    if (!Number.isInteger(laneCount) || laneCount < 1 || laneCount > 24) throw new Error("泳道数必须是 1–24 的整数");
+    if (!Array.isArray(rows)) throw new Error("条件矩阵必须是行数组");
+    if (rows.length < 1 || rows.length > 8) throw new Error("条件矩阵需要 1–8 行");
+    const names = new Set();
+    return rows.map((row, rowIndex) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error(`第 ${rowIndex + 1} 行格式无效`);
+      const name = String(row.name == null ? "" : row.name).trim();
+      if (!name) throw new Error(`第 ${rowIndex + 1} 行的条件名不能为空`);
+      if ([...name].length > 40) throw new Error(`第 ${rowIndex + 1} 行的条件名不能超过 40 个字符`);
+      const nameKey = name.normalize("NFKC").toLowerCase();
+      if (names.has(nameKey)) throw new Error(`条件名不能重复：${name}`);
+      names.add(nameKey);
+      if (!Array.isArray(row.values)) throw new Error(`第 ${rowIndex + 1} 行缺少泳道值`);
+      if (row.values.length !== laneCount) throw new Error(`第 ${rowIndex + 1} 行“${name}”需要 ${laneCount} 个泳道值，当前为 ${row.values.length} 个`);
+      return { name, values: row.values.map((value, laneIndex) => normalizedConditionValue(value, rowIndex, laneIndex)) };
+    });
+  }
+
+  function splitConditionValues(text) {
+    if (!/[,，;；]/u.test(text)) {
+      const value = text.trim();
+      return value ? value.split(/\s+/u) : [""];
+    }
+    const values = [];
+    text.split(/[,，;；]/u).forEach((part) => {
+      const value = part.trim();
+      if (!value) values.push("");
+      else values.push(...value.split(/\s+/u));
+    });
+    return values;
+  }
+
+  function parseConditionMatrix(input, laneCount) {
+    if (typeof input !== "string") throw new Error("条件矩阵必须是文本");
+    const lines = input.replace(/^\ufeff/, "").split(/\r?\n/).filter((line) => line.trim());
+    const rows = lines.map((line, rowIndex) => {
+      const colon = [line.indexOf(":"), line.indexOf("：")].filter((index) => index >= 0).sort((left, right) => left - right)[0];
+      if (colon === undefined) throw new Error(`第 ${rowIndex + 1} 行缺少冒号；格式应为“条件名: −, +, −”`);
+      return { name: line.slice(0, colon), values: splitConditionValues(line.slice(colon + 1)) };
+    });
+    return normalizeConditionRows(rows, laneCount);
+  }
+
+  function conditionMatrixToText(rows) {
+    if (!Array.isArray(rows)) throw new Error("条件矩阵必须是行数组");
+    if (!rows.length) return "";
+    const laneCount = Array.isArray(rows[0]?.values) ? rows[0].values.length : 0;
+    return normalizeConditionRows(rows, laneCount).map((row) => `${row.name}: ${row.values.join(", ")}`).join("\n");
   }
 
   function windowAverages(values, size) {
@@ -1188,6 +1247,9 @@
     pdfFromJpegs,
     xlsxWorkbook,
     parseSampleMapTable,
+    parseConditionMatrix,
+    normalizeConditionRows,
+    conditionMatrixToText,
     suggestLaneRois,
     laneRoisAtBandCenter,
     assessExposureSeries,

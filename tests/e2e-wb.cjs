@@ -213,13 +213,48 @@ async function waitForServer(url) {
     assert.equal(await page.locator("#singleLevelMode").getAttribute("aria-pressed"), "true", "new projects should open in the single-level interface");
     assert.match(await page.locator("#previewStatus").textContent(), /10 个样本/);
     assert.equal(await page.locator("#footerLabel").inputValue(), "MDA-MB-231");
-    const ungroupedCanvasHeight = await page.locator("#figureCanvas").evaluate((canvas) => canvas.height);
+    const blankCanvasMetrics = () => page.locator("#figureCanvas").evaluate((canvas) => {
+      const { data } = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+      let stripTop = -1;
+      for (let y = 0; y < canvas.height; y += 1) {
+        let blankPixels = 0;
+        for (let x = 0; x < canvas.width; x += 1) {
+          const offset = (y * canvas.width + x) * 4;
+          if (data[offset] === 240 && data[offset + 1] === 243 && data[offset + 2] === 247) blankPixels += 1;
+        }
+        if (blankPixels > canvas.width / 5) { stripTop = y; break; }
+      }
+      return { width: canvas.width, height: canvas.height, stripTop };
+    });
     await page.locator("#nestedLevelMode").click();
-    await page.waitForFunction((height) => document.querySelector("#figureCanvas")?.height > height, ungroupedCanvasHeight);
     assert.equal(await page.locator("#nestedLevelMode").getAttribute("aria-pressed"), "true");
     assert.equal(await page.locator("#groupInputCaption").textContent(), "顶部来源大组与泳道数");
+    assert.ok(await page.locator("#conditionMatrixFields").isVisible());
+    assert.ok(await page.locator("#laneLabelFields").isHidden());
+    const firstCondition = "Treatment A: −, +, −, +, −, +, −, +, −, +";
+    const twoConditions = `${firstCondition}\nCondition B: +, +, −, −, +, +, −, −, +, −`;
+    await page.locator("#conditionMatrixInput").fill(firstCondition);
+    await page.locator("#applyGroups").click();
+    await page.waitForFunction(() => document.querySelector("#toast")?.textContent.includes("处理条件矩阵已更新"));
+    const oneConditionMetrics = await blankCanvasMetrics();
+    assert.ok(oneConditionMetrics.stripTop >= 0, "the placeholder strip must remain detectable below the condition matrix");
+    await page.locator("#conditionMatrixInput").fill(twoConditions);
+    await page.locator("#applyGroups").click();
+    await page.waitForFunction((height) => document.querySelector("#figureCanvas")?.height > height, oneConditionMetrics.height);
+    const twoConditionMetrics = await blankCanvasMetrics();
+    assert.equal(twoConditionMetrics.width, oneConditionMetrics.width, "adding a short condition row should not change figure width");
+    assert.equal(twoConditionMetrics.height - oneConditionMetrics.height, twoConditionMetrics.stripTop - oneConditionMetrics.stripTop, "additional conditions must move the strip down instead of adding blank space below it");
+    const validMatrixCanvas = await page.locator("#figureCanvas").evaluate((canvas) => canvas.toDataURL());
+    await page.locator("#conditionMatrixInput").fill("Treatment A: −, +, −, +, −, +, −, +, −");
+    await page.locator("#applyGroups").click();
+    await page.waitForFunction(() => document.querySelector("#toast")?.textContent.includes("需要 10 个泳道值"));
+    assert.equal(await page.locator("#figureCanvas").evaluate((canvas) => canvas.toDataURL()), validMatrixCanvas, "invalid matrices must not overwrite the last valid figure");
+    await page.locator("#conditionMatrixInput").fill(twoConditions);
+    await page.locator("#applyGroups").click();
     await page.locator("#singleLevelMode").click();
-    await page.waitForFunction((height) => document.querySelector("#figureCanvas")?.height === height, ungroupedCanvasHeight);
+    assert.ok(await page.locator("#conditionMatrixFields").isHidden());
+    await page.locator("#nestedLevelMode").click();
+    assert.equal(await page.locator("#conditionMatrixInput").inputValue(), twoConditions, "switching views must preserve the condition matrix");
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#newProject").click();
     await page.waitForFunction(() => document.querySelector("#groupInput")?.value.includes("Control × 1"));
@@ -421,6 +456,34 @@ async function waitForServer(url) {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.locator('[data-close-dialog="quantDialog"]').click();
 
+    await page.locator("#nestedLevelMode").click();
+    const savedConditionRows = [
+      { name: "Treatment A", values: ["−", "+", "−"] },
+      { name: "Condition B", values: ["+", "−", "+"] },
+    ];
+    await page.locator("#conditionMatrixInput").fill("Treatment A: −, +, −\nCondition B: +, −, +");
+    await page.locator("#applyGroups").click();
+    await page.waitForFunction(() => document.querySelector("#toast")?.textContent.includes("处理条件矩阵已更新"));
+    const svgDownload = page.waitForEvent("download");
+    await page.locator("#exportSvg").click();
+    const svgFile = await svgDownload;
+    const svgText = fs.readFileSync(await svgFile.path(), "utf8");
+    const roleTexts = (role) => [...svgText.matchAll(new RegExp(`<text data-role="${role}"[^>]*>([^<]*)<\\/text>`, "g"))].map((match) => match[1]);
+    const svgGroupLabels = roleTexts("group-label");
+    assert.equal(svgGroupLabels.length, 2);
+    assert.ok(svgGroupLabels[0].startsWith("Co"), "the narrow one-lane Control label should remain identifiable when fitted");
+    assert.equal(svgGroupLabels[1], "Drug");
+    assert.deepEqual(roleTexts("condition-label"), savedConditionRows.map(({ name }) => name));
+    assert.deepEqual(roleTexts("condition-value"), savedConditionRows.flatMap(({ values }) => values));
+    assert.doesNotMatch(svgText, /data-role="lane-label"/, "matrix figures must suppress the old angled lane labels");
+    const groupSpans = [...svgText.matchAll(/<line data-role="group-underline" x1="([^"]+)"[^>]*x2="([^"]+)"/g)].map((match) => Number(match[2]) - Number(match[1]));
+    assert.equal(groupSpans.length, 2);
+    assert.ok(groupSpans[1] > groupSpans[0], "a two-lane group underline must be wider than a one-lane group underline");
+    if (process.env.E2E_MATRIX_SCREENSHOT) {
+      const matrixPng = await page.locator("#figureCanvas").evaluate((canvas) => canvas.toDataURL("image/png"));
+      fs.writeFileSync(process.env.E2E_MATRIX_SCREENSHOT, Buffer.from(matrixPng.split(",")[1], "base64"));
+    }
+
     const tiffDownload = page.waitForEvent("download");
     await page.locator("#exportTiff").click();
     const tiffFile = await tiffDownload;
@@ -457,8 +520,9 @@ async function waitForServer(url) {
     assert.match(projectFile.suggestedFilename(), /project\.wb-project$/);
     const projectPath = await projectFile.path();
     const project = JSON.parse(fs.readFileSync(projectPath, "utf8"));
-    assert.equal(project.version, 5);
-    assert.equal(project.settings.showGroupBrackets, false);
+    assert.equal(project.version, 6);
+    assert.equal(project.settings.showGroupBrackets, true);
+    assert.deepEqual(project.settings.conditionRows, savedConditionRows);
     assert.equal(project.rows.length, 2);
     assert.equal(project.rows[1].backgroundClean, 60);
     assert.equal(project.rows[1].rotation, -2.3);
@@ -469,6 +533,8 @@ async function waitForServer(url) {
     await page.locator("#newProject").click();
     await page.locator("#projectFile").setInputFiles(projectPath);
     await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 2);
+    assert.equal(await page.locator("#nestedLevelMode").getAttribute("aria-pressed"), "true");
+    assert.equal(await page.locator("#conditionMatrixInput").inputValue(), "Treatment A: −, +, −\nCondition B: +, −, +");
     await page.locator("#rowList .protein-row").nth(1).getByRole("button", { name: "裁剪/调图" }).click();
     assert.equal(await page.locator("#editBackgroundClean").inputValue(), "60");
     assert.equal(await page.locator("#editRotation").inputValue(), "-2.3");
@@ -484,6 +550,31 @@ async function waitForServer(url) {
     await page.locator("#openPanels").click();
     assert.equal(await page.locator("#panelGrid .panel-card").count(), 2);
     await page.locator('[data-close-dialog="panelDialog"]').click();
+
+    const noMatrixV6Path = path.join(fixtureDir, "no-matrix-v6.wb-project");
+    const noMatrixV6 = JSON.parse(JSON.stringify(project));
+    noMatrixV6.settings.showGroupBrackets = false;
+    noMatrixV6.settings.conditionRows = [];
+    fs.writeFileSync(noMatrixV6Path, JSON.stringify(noMatrixV6));
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#newProject").click();
+    await page.locator("#projectFile").setInputFiles(noMatrixV6Path);
+    await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 2);
+    assert.equal(await page.locator("#singleLevelMode").getAttribute("aria-pressed"), "true", "v6 projects without a matrix must remain valid");
+    assert.equal(await page.locator("#conditionMatrixInput").inputValue(), "");
+
+    const legacyV5Path = path.join(fixtureDir, "legacy-v5.wb-project");
+    const legacyV5 = JSON.parse(JSON.stringify(project));
+    legacyV5.version = 5;
+    legacyV5.settings.showGroupBrackets = true;
+    delete legacyV5.settings.conditionRows;
+    fs.writeFileSync(legacyV5Path, JSON.stringify(legacyV5));
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#newProject").click();
+    await page.locator("#projectFile").setInputFiles(legacyV5Path);
+    await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 2);
+    assert.equal(await page.locator("#nestedLevelMode").getAttribute("aria-pressed"), "true", "v5 nested projects must still open in the redesigned double-level view");
+    assert.equal(await page.locator("#conditionMatrixInput").inputValue(), "", "v5 projects must not invent experimental conditions");
 
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#newProject").click();
@@ -642,7 +733,7 @@ async function waitForServer(url) {
     const cleavageProjectDownload = page.waitForEvent("download");
     await page.locator("#saveProject").click();
     const cleavageProject = JSON.parse(fs.readFileSync(await (await cleavageProjectDownload).path(), "utf8"));
-    assert.equal(cleavageProject.version, 5);
+    assert.equal(cleavageProject.version, 6);
     assert.equal(cleavageProject.settings.quant.normalizationMode, "paired-band");
     assert.equal(cleavageProject.settings.quant.rois[cleavageNumeratorKey].polarity, "bright");
     assert.equal(cleavageProject.settings.quant.rois[cleavageDenominatorKey].polarity, "bright");
