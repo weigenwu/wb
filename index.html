@@ -252,7 +252,7 @@
     .group-summary { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
     .chip { padding: 7px 9px; border-radius: 999px; color: var(--blue-dark); background: var(--blue-soft); font-size: 11px; font-weight: 800; }
     .inline-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-    .hierarchy-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 16px; }
+    .hierarchy-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 16px; }
     .hierarchy-option {
       min-height: 78px;
       padding: 11px;
@@ -600,6 +600,10 @@
                 <strong>双层组图</strong>
                 <span>大组横线＋每泳道条件 + / −</span>
               </button>
+              <button class="hierarchy-option" id="fractionLevelMode" type="button" aria-pressed="false">
+                <strong>分区组图</strong>
+                <span>组分跨列＋组内泳道标签</span>
+              </button>
             </div>
             <label class="caption" id="groupInputCaption" for="groupInput">实验组名称与样本数</label>
             <textarea id="groupInput" spellcheck="false">Control × 1, Group 1 × 1, Group 2 × 1</textarea>
@@ -904,8 +908,8 @@
       const MAX_PIXELS = 50_000_000;
       const MAX_PROJECT_FILE_BYTES = 162 * 1024 * 1024;
       const PROJECT_KIND = "blotboard-project";
-      const PROJECT_VERSION = 6;
-      const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, 4, 5, PROJECT_VERSION];
+      const PROJECT_VERSION = 7;
+      const SUPPORTED_PROJECT_VERSIONS = [1, 2, 3, 4, 5, 6, PROJECT_VERSION];
       const PROJECT_DB = "blotboard-wb";
       const PROJECT_STORE = "projects";
       const AUTOSAVE_KEY = "current";
@@ -928,6 +932,8 @@
         footerLabel: "Cell line",
         showGroupBrackets: false,
         conditionRows: [],
+        fractionMode: false,
+        fractionGroups: [],
         laneWidth: 40,
         rowHeight: 40,
         rowGap: 7,
@@ -1001,6 +1007,8 @@
           footerLabel: state.footerLabel,
           showGroupBrackets: state.showGroupBrackets,
           conditionRows: cloneConditionRows(state.conditionRows),
+          fractionMode: state.fractionMode,
+          fractionGroups: state.fractionGroups.map((group) => ({ ...group })),
           laneWidth: state.laneWidth,
           rowHeight: state.rowHeight,
           rowGap: state.rowGap,
@@ -1019,7 +1027,7 @@
       }
 
       function syncWorkspaceFromState() {
-        $("#groupInput").value = groupsToText(state.groups);
+        $("#groupInput").value = groupsToText(state.fractionMode ? state.fractionGroups : state.groups);
         $("#laneLabelInput").value = laneLabelsToText(state.laneLabels);
         $("#conditionMatrixInput").value = window.WBCore.conditionMatrixToText(state.conditionRows);
         syncLayoutControls();
@@ -1048,6 +1056,8 @@
           footerLabel: snapshot.footerLabel,
           showGroupBrackets: snapshot.showGroupBrackets ?? false,
           conditionRows: cloneConditionRows(snapshot.conditionRows),
+          fractionMode: snapshot.fractionMode ?? false,
+          fractionGroups: snapshot.fractionGroups?.map((group) => ({ ...group })) || [],
           laneWidth: snapshot.laneWidth,
           rowHeight: snapshot.rowHeight,
           rowGap: snapshot.rowGap,
@@ -1147,6 +1157,26 @@
         return { text: output, size: fontSize };
       }
 
+      function wrappedHeaderLabel(text, maxWidth, size) {
+        const value = String(text || "").trim();
+        if (measuredWidth(value, size) <= maxWidth) return { lines: [value], size };
+        const words = value.split(/\s+/).filter(Boolean);
+        if (words.length < 2) {
+          const fitted = fittedLabel(value, maxWidth, size);
+          return { lines: [fitted.text], size: fitted.size };
+        }
+        let split = 1;
+        let bestWidth = Infinity;
+        for (let index = 1; index < words.length; index += 1) {
+          const width = Math.max(measuredWidth(words.slice(0, index).join(" "), size), measuredWidth(words.slice(index).join(" "), size));
+          if (width < bestWidth) { bestWidth = width; split = index; }
+        }
+        const lines = [words.slice(0, split).join(" "), words.slice(split).join(" ")];
+        let fontSize = size;
+        while (fontSize > 10 && lines.some((line) => measuredWidth(line, fontSize) > maxWidth)) fontSize -= 1;
+        return { lines: lines.map((line) => fittedLabel(line, maxWidth, fontSize).text), size: fontSize };
+      }
+
       function fullLabelAngle(text, slotWidth, size, weight = 700) {
         const width = measuredWidth(text, size, weight);
         const available = Math.max(1, slotWidth - 12);
@@ -1226,12 +1256,32 @@
         return labels.join(", ");
       }
 
+      function groupsFromLaneLabels(labels) {
+        const groups = [];
+        labels.forEach((label) => {
+          const previous = groups[groups.length - 1];
+          if (previous?.name === label) previous.count += 1;
+          else groups.push({ name: label, count: 1 });
+        });
+        return groups;
+      }
+
       function resolvedLaneLabels() {
         return state.laneLabels.length === totalSamples() ? state.laneLabels : defaultLaneLabels(state.groups);
       }
 
       function conditionMatrixActive() {
-        return state.showGroupBrackets;
+        return state.showGroupBrackets && !state.fractionMode;
+      }
+
+      function fractionLayoutActive() {
+        return state.fractionMode
+          && state.fractionGroups.length > 0
+          && state.fractionGroups.reduce((sum, group) => sum + group.count, 0) === totalSamples();
+      }
+
+      function hierarchyMode() {
+        return state.fractionMode ? "fraction" : state.showGroupBrackets ? "matrix" : "single";
       }
 
       function syncLayoutControls() {
@@ -1253,18 +1303,29 @@
       }
 
       function syncHierarchyControls() {
-        const nested = state.showGroupBrackets;
-        $("#singleLevelMode").setAttribute("aria-pressed", String(!nested));
-        $("#nestedLevelMode").setAttribute("aria-pressed", String(nested));
-        $("#laneLabelFields").hidden = nested;
-        $("#conditionMatrixFields").hidden = !nested;
-        $("#groupInputCaption").textContent = nested ? "顶部来源大组与泳道数" : "实验组名称与样本数";
-        $("#groupInputHelp").textContent = nested
-          ? "格式示例：NK × 2, WT × 4, OE × 4；每个大组的数量应覆盖对应泳道。"
-          : "格式示例：Control × 3, Drug × 3；适合同一细胞系内直接比较。";
-        $("#laneLabelCaption").textContent = "泳道标签（可选）";
-        $("#laneLabelHelp").textContent = "逗号分隔，数量须与总样本数一致；留空会自动生成。";
-        $("#applyGroups").textContent = nested ? "应用分组与条件矩阵" : "应用分组与标签";
+        const mode = hierarchyMode();
+        $("#singleLevelMode").setAttribute("aria-pressed", String(mode === "single"));
+        $("#nestedLevelMode").setAttribute("aria-pressed", String(mode === "matrix"));
+        $("#fractionLevelMode").setAttribute("aria-pressed", String(mode === "fraction"));
+        $("#laneLabelFields").hidden = mode === "matrix";
+        $("#conditionMatrixFields").hidden = mode !== "matrix";
+        if (mode === "fraction") {
+          $("#groupInputCaption").textContent = "顶部组分名称与泳道数";
+          $("#groupInputHelp").textContent = "格式示例：Cytoplasmic fraction × 2, Nuclear fraction × 2；组分只用于成图标注。";
+          $("#laneLabelCaption").textContent = "各组分内的泳道标签（必填）";
+          $("#laneLabelHelp").textContent = "按泳道顺序填写，例如 NC, sh, NC, sh；数量须与总泳道数一致。灰度定量分组请在样本映射中另行核对。";
+          $("#applyGroups").textContent = "应用组分与泳道标签";
+        } else if (mode === "matrix") {
+          $("#groupInputCaption").textContent = "顶部来源大组与泳道数";
+          $("#groupInputHelp").textContent = "格式示例：NK × 2, WT × 4, OE × 4；每个大组的数量应覆盖对应泳道。";
+          $("#applyGroups").textContent = "应用分组与条件矩阵";
+        } else {
+          $("#groupInputCaption").textContent = "实验组名称与样本数";
+          $("#groupInputHelp").textContent = "格式示例：Control × 3, Drug × 3；适合同一细胞系内直接比较。";
+          $("#laneLabelCaption").textContent = "泳道标签（可选）";
+          $("#laneLabelHelp").textContent = "逗号分隔，数量须与总样本数一致；留空会自动生成。";
+          $("#applyGroups").textContent = "应用分组与标签";
+        }
       }
 
       function syncLaneToggleAvailability() {
@@ -1302,7 +1363,8 @@
 
       function renderGroupSummary() {
         const summary = $("#groupSummary");
-        summary.replaceChildren(...state.groups.map((group) => {
+        const visibleGroups = state.fractionMode ? state.fractionGroups : state.groups;
+        summary.replaceChildren(...visibleGroups.map((group) => {
           const chip = document.createElement("span");
           chip.className = "chip";
           chip.textContent = `${group.name} · ${group.count}`;
@@ -1470,6 +1532,8 @@
         state.footerLabel = "Cell line";
         state.showGroupBrackets = false;
         state.conditionRows = [];
+        state.fractionMode = false;
+        state.fractionGroups = [];
         state.laneWidth = 40;
         state.rowHeight = 40;
         state.rowGap = 7;
@@ -1539,6 +1603,8 @@
           || state.footerLabel !== "Cell line"
           || state.showGroupBrackets
           || state.conditionRows.length > 0
+          || state.fractionMode
+          || state.fractionGroups.length > 0
           || state.laneWidth !== 40
           || state.rowHeight !== 40
           || state.rowGap !== 7
@@ -1813,6 +1879,7 @@
       function geometry() {
         const compact = state.layoutMode === "compact";
         const matrixActive = conditionMatrixActive();
+        const fractionActive = fractionLayoutActive();
         const longestName = Math.max(0, ...state.rows.map((row) => measuredWidth(row.name, state.labelSize)));
         const longestCondition = matrixActive ? Math.max(0, ...state.conditionRows.map((row) => measuredWidth(row.name, state.labelSize, 500))) : 0;
         const mwSize = compact ? state.labelSize : Math.max(12, state.labelSize - 3);
@@ -1830,16 +1897,19 @@
         ) : 0;
         const groupAngles = compact ? [] : state.groups.map((group) => fullLabelAngle(group.name, group.count * state.rowHeight, state.labelSize));
         const groupTop = state.groups.reduce((maximum, group, index) => Math.max(maximum, measuredWidth(group.name, state.labelSize) * Math.sin(groupAngles[index] || 0)), 0);
-        const topGroups = matrixActive || (compact && state.showGroupBrackets && state.groups.length > 1 && totalSamples() > 1);
+        const topGroups = matrixActive || fractionActive || (compact && state.showGroupBrackets && state.groups.length > 1 && totalSamples() > 1);
         const baseTop = compact ? Math.max(72, Math.ceil(longestLaneLabel * Math.sin(labelAngle) + state.labelSize + 18)) : Math.max(82, Math.ceil(groupTop + state.labelSize + 42));
         const topGroupLabelY = Math.max(12, Math.ceil(state.labelSize * .75));
-        const topGroupLineY = topGroupLabelY + Math.max(14, Math.ceil(state.labelSize * .9));
+        const topGroupLineY = topGroupLabelY + (fractionActive ? Math.max(30, Math.ceil(state.labelSize * 1.9)) : Math.max(14, Math.ceil(state.labelSize * .9)));
         const matrixRowStep = Math.max(22, Math.ceil(state.labelSize * 1.45));
         const matrixFirstRowY = topGroupLineY + Math.max(20, Math.ceil(state.labelSize * 1.3));
+        const fractionLaneLabelY = topGroupLineY + Math.max(20, Math.ceil(state.labelSize * 1.3));
         const matrixLastRowY = state.conditionRows.length
           ? matrixFirstRowY + (state.conditionRows.length - 1) * matrixRowStep
           : topGroupLineY;
-        const top = matrixActive
+        const top = fractionActive
+          ? fractionLaneLabelY + Math.max(22, Math.ceil(state.labelSize * 1.35))
+          : matrixActive
           ? matrixLastRowY + (state.conditionRows.length ? Math.max(22, Math.ceil(state.labelSize * 1.35)) : 18)
           : baseTop + (topGroups ? topGroupLineY + 8 : 0);
         const rowCount = Math.max(1, state.rows.length);
@@ -1848,7 +1918,7 @@
         const footerLabelY = footerLineY + 23;
         const bottom = compact && state.footerLabel.trim() ? 86 : (state.showLanes ? 55 : 28);
         const height = contentBottom + bottom;
-        return { width, height, left, right, top, bottom, bandWidth, contentBottom, topGroups, topGroupLineY, topGroupLabelY, matrixActive, matrixFirstRowY, matrixRowStep, footerLineY, footerLabelY, labelAngle, groupAngles };
+        return { width, height, left, right, top, bottom, bandWidth, contentBottom, topGroups, topGroupLineY, topGroupLabelY, matrixActive, matrixFirstRowY, matrixRowStep, fractionActive, fractionLaneLabelY, footerLineY, footerLabelY, labelAngle, groupAngles };
       }
 
       function drawContainedImage(ctx, row, x, y, width, height) {
@@ -1918,7 +1988,37 @@
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillStyle = "#111827";
-        if (g.matrixActive) {
+        if (g.fractionActive) {
+          let laneOffset = 0;
+          ctx.strokeStyle = "#111827";
+          ctx.fillStyle = "#111827";
+          ctx.textAlign = "center";
+          state.fractionGroups.forEach((group) => {
+            const start = g.left + laneOffset * laneWidth;
+            const end = start + group.count * laneWidth;
+            const span = end - start;
+            const inset = Math.min(7, span * .1);
+            ctx.lineCap = "round";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(start + inset, g.topGroupLineY);
+            ctx.lineTo(end - inset, g.topGroupLineY);
+            ctx.stroke();
+            const label = wrappedHeaderLabel(group.name, Math.max(1, span - 6), state.labelSize);
+            const lineStep = Math.max(13, Math.ceil(label.size * 1.05));
+            const firstY = g.topGroupLineY - 8 - (label.lines.length - 1) * lineStep;
+            ctx.font = `700 ${label.size}px Arial, "Microsoft YaHei", sans-serif`;
+            label.lines.forEach((line, index) => ctx.fillText(line, (start + end) / 2, firstY + index * lineStep));
+            laneOffset += group.count;
+          });
+          ctx.lineCap = "butt";
+          resolvedLaneLabels().forEach((value, lane) => {
+            const label = fittedLabel(value, Math.max(1, laneWidth - 4), state.labelSize, 700);
+            ctx.font = `700 ${label.size}px Arial, "Microsoft YaHei", sans-serif`;
+            ctx.textAlign = "center";
+            ctx.fillText(label.text, g.left + (lane + .5) * laneWidth, g.fractionLaneLabelY);
+          });
+        } else if (g.matrixActive) {
           let laneOffset = 0;
           ctx.strokeStyle = "#111827";
           ctx.fillStyle = "#111827";
@@ -2289,7 +2389,25 @@
         const heightCm = widthCm * g.height / g.width;
         const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${widthCm.toFixed(4)}cm" height="${heightCm.toFixed(4)}cm" viewBox="0 0 ${g.width} ${g.height}">`, `<rect width="100%" height="100%" fill="white"/>`];
         const compact = state.layoutMode === "compact";
-        if (g.matrixActive) {
+        if (g.fractionActive) {
+          let laneOffset = 0;
+          state.fractionGroups.forEach((group) => {
+            const start = g.left + laneOffset * laneWidth;
+            const end = start + group.count * laneWidth;
+            const span = end - start;
+            const inset = Math.min(7, span * .1);
+            const label = wrappedHeaderLabel(group.name, Math.max(1, span - 6), state.labelSize);
+            const lineStep = Math.max(13, Math.ceil(label.size * 1.05));
+            const firstY = g.topGroupLineY - 8 - (label.lines.length - 1) * lineStep;
+            parts.push(`<line data-role="fraction-group-underline" x1="${start + inset}" y1="${g.topGroupLineY}" x2="${end - inset}" y2="${g.topGroupLineY}" stroke="#111827" stroke-width="4" stroke-linecap="round"/>`);
+            parts.push(`<text data-role="fraction-group-label" data-label="${xml(group.name)}" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${label.size}" font-weight="700" fill="#111827">${label.lines.map((line, index) => `<tspan x="${(start + end) / 2}" y="${firstY + index * lineStep}" dominant-baseline="middle">${xml(line)}</tspan>`).join("")}</text>`);
+            laneOffset += group.count;
+          });
+          resolvedLaneLabels().forEach((value, lane) => {
+            const label = fittedLabel(value, Math.max(1, laneWidth - 4), state.labelSize, 700);
+            parts.push(`<text data-role="fraction-lane-label" data-label="${xml(value)}" x="${g.left + (lane + .5) * laneWidth}" y="${g.fractionLaneLabelY}" dominant-baseline="middle" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${label.size}" font-weight="700" fill="#111827">${xml(label.text)}</text>`);
+          });
+        } else if (g.matrixActive) {
           let laneOffset = 0;
           state.groups.forEach((group) => {
             const start = g.left + laneOffset * laneWidth;
@@ -2563,6 +2681,8 @@
             groups: state.groups,
             lane_labels: resolvedLaneLabels(),
             condition_rows: cloneConditionRows(state.conditionRows),
+            hierarchy_mode: hierarchyMode(),
+            fraction_groups: state.fractionGroups.map((group) => ({ ...group })),
             rows: state.rows.map((row, index) => ({ order: index + 1, row_key: row.rowKey, protein: row.name, molecular_weight: row.mw, role: row.role, membrane_id: row.membraneId, source_file: row.sourceName, source_sha256: row.sourceSha256, splices: row.splices || [], crop: row.crop, brightness: row.brightness, contrast: row.contrast, background_clean: row.backgroundClean || 0, rotation_degrees: row.rotation || 0, invert: row.invert })),
             panels: state.panels.map((panel, index) => ({ order: index + 1, key: panel.key, type: panel.type, label: panel.label, source_file: panel.sourceFile?.name || "current WB figure" })),
             preflight: report,
@@ -3083,6 +3203,7 @@
         state.laneLabels = nextLaneLabels;
         if (laneCountChanged) {
           state.conditionRows = [];
+          state.fractionGroups = [];
           invalidateQuantForSampleLayout(previousSequence.length);
         }
         else if (groupsChanged) {
@@ -3187,7 +3308,7 @@
               invalidateExposureReport();
               if (key === "group") {
                 state.groups = importedGroups(state.quant.sampleMap);
-                $("#groupInput").value = groupsToText(state.groups);
+                if (!state.fractionMode) $("#groupInput").value = groupsToText(state.groups);
                 state.quant.controlGroup = uniqueGroupNames().includes(state.quant.controlGroup) ? state.quant.controlGroup : uniqueGroupNames()[0] || "";
                 renderGroupSummary();
                 syncQuantSelectors(quantView?.row?.rowKey);
@@ -3219,15 +3340,21 @@
         const laneLabels = parsed.map((sample) => sample.laneLabel || sample.sampleId);
         const sampleMap = parsed.map(({ laneLabel, ...sample }) => sample);
         const previousLaneCount = totalSamples();
+        const preserveFractions = state.fractionMode && state.fractionGroups.reduce((sum, group) => sum + group.count, 0) === parsed.length;
         state.groups = groups;
         state.laneLabels = laneLabels;
         state.conditionRows = [];
+        if (!preserveFractions) {
+          state.fractionMode = false;
+          state.fractionGroups = [];
+        }
         state.quant.sampleMap = sampleMap;
         state.quant.controlGroup = uniqueGroupNames().includes(state.quant.controlGroup) ? state.quant.controlGroup : sampleMap[0].group;
         invalidateQuantForSampleLayout(previousLaneCount, false);
-        $("#groupInput").value = groupsToText(state.groups);
+        $("#groupInput").value = groupsToText(state.fractionMode ? state.fractionGroups : state.groups);
         $("#laneLabelInput").value = laneLabelsToText(state.laneLabels);
         $("#conditionMatrixInput").value = "";
+        syncHierarchyControls();
         renderGroupSummary();
         syncQuantSelectors();
         renderSampleMap();
@@ -4661,7 +4788,7 @@
 
       function layoutTemplate() {
         return {
-          version: 2,
+          version: 3,
           savedAt: new Date().toISOString(),
           groups: state.groups,
           laneLabels: state.laneLabels,
@@ -4669,6 +4796,8 @@
           layoutMode: state.layoutMode,
           footerLabel: state.footerLabel,
           showGroupBrackets: state.showGroupBrackets,
+          fractionMode: state.fractionMode,
+          fractionGroups: state.fractionGroups.map((group) => ({ ...group })),
           laneWidth: state.laneWidth,
           rowGap: state.rowGap,
           labelSize: state.labelSize,
@@ -4696,11 +4825,15 @@
           if (templateLaneCount > 24) throw new Error("模板样本数超过 24");
           const templateLaneLabels = Array.isArray(template.laneLabels) && template.laneLabels.length === templateLaneCount ? template.laneLabels.map((label) => String(label).slice(0, 40)) : defaultLaneLabels(templateGroups);
           const templateConditionRows = Array.isArray(template.conditionRows) && template.conditionRows.length ? window.WBCore.normalizeConditionRows(template.conditionRows, templateLaneCount) : [];
+          const templateFractionGroups = Array.isArray(template.fractionGroups) ? template.fractionGroups.map((group) => ({ name: String(group.name || "").trim().slice(0, 40), count: Math.max(1, Math.min(24, Number(group.count) || 1)) })) : [];
+          const templateFractionValid = templateFractionGroups.length > 0 && templateFractionGroups.every((group) => group.name) && templateFractionGroups.reduce((sum, group) => sum + group.count, 0) === templateLaneCount;
           if (!applySampleLayout(templateGroups, templateLaneLabels)) return false;
           state.layoutMode = ["compact", "groups"].includes(template.layoutMode) ? template.layoutMode : "compact";
           state.footerLabel = String(template.footerLabel || "").slice(0, 40);
           state.showGroupBrackets = Boolean(template.showGroupBrackets);
           state.conditionRows = cloneConditionRows(templateConditionRows);
+          state.fractionMode = Boolean(template.fractionMode) && templateFractionValid;
+          state.fractionGroups = state.fractionMode ? templateFractionGroups : [];
           state.laneWidth = Math.max(28, Math.min(130, Number(template.laneWidth) || 40));
           state.rowHeight = state.laneWidth;
           state.rowGap = Math.max(0, Math.min(48, Number(template.rowGap) || 0));
@@ -4896,6 +5029,8 @@
             footerLabel: state.footerLabel,
             showGroupBrackets: state.showGroupBrackets,
             conditionRows: cloneConditionRows(state.conditionRows),
+            fractionMode: state.fractionMode,
+            fractionGroups: state.fractionGroups.map((group) => ({ name: group.name, count: group.count })),
             laneWidth: state.laneWidth,
             rowHeight: state.rowHeight,
             rowGap: state.rowGap,
@@ -5062,6 +5197,17 @@
         if (!["compact", "groups"].includes(settings.layoutMode)) throw new Error("项目中的版式无效");
         if (typeof settings.footerLabel !== "string" || settings.footerLabel.length > 40) throw new Error("项目中的底部说明无效");
         if (project.version >= 6 && !Array.isArray(settings.conditionRows)) throw new Error("项目中的处理条件矩阵无效");
+        if (project.version >= 7 && (!Array.isArray(settings.fractionGroups) || typeof settings.fractionMode !== "boolean")) throw new Error("项目中的分区组图设置无效");
+        const fractionMode = project.version >= 7 ? settings.fractionMode : false;
+        const parsedFractionGroups = project.version >= 7 ? settings.fractionGroups.map((group) => {
+          if (!group || typeof group.name !== "string" || !group.name.trim() || group.name.length > 40) throw new Error("项目中的组分名称无效");
+          const count = finiteInRange(group.count, 1, 24, "组分泳道数");
+          if (!Number.isInteger(count)) throw new Error("组分泳道数必须为整数");
+          return { name: group.name, count };
+        }) : [];
+        const fractionGroupsValid = parsedFractionGroups.length > 0 && parsedFractionGroups.reduce((sum, group) => sum + group.count, 0) === laneCount;
+        if (fractionMode && !fractionGroupsValid) throw new Error("项目中的组分跨度与总泳道数不一致");
+        const fractionGroups = fractionGroupsValid ? parsedFractionGroups : [];
         const normalizedSettings = {
           groups,
           laneLabels: [...settings.laneLabels],
@@ -5069,6 +5215,8 @@
           footerLabel: settings.footerLabel,
           showGroupBrackets: project.version >= 3 ? booleanValue(settings.showGroupBrackets, "顶部来源分组开关") : false,
           conditionRows: project.version >= 6 && settings.conditionRows.length ? window.WBCore.normalizeConditionRows(settings.conditionRows, laneCount) : [],
+          fractionMode,
+          fractionGroups,
           laneWidth: finiteInRange(settings.laneWidth, 28, 130, "泳道宽度"),
           rowHeight: finiteInRange(settings.rowHeight, 28, 130, "条带行高"),
           rowGap: finiteInRange(settings.rowGap, 0, 48, "行间距"),
@@ -5248,6 +5396,8 @@
         state.footerLabel = settings.footerLabel;
         state.showGroupBrackets = settings.showGroupBrackets;
         state.conditionRows = cloneConditionRows(settings.conditionRows);
+        state.fractionMode = settings.fractionMode;
+        state.fractionGroups = settings.fractionGroups.map((group) => ({ ...group }));
         state.laneWidth = settings.rowHeight;
         state.rowHeight = settings.rowHeight;
         state.rowGap = settings.rowGap;
@@ -5324,7 +5474,7 @@
           ["brightness_percent", true], ["contrast_percent", true], ["background_clean_percent", true], ["rotation_degrees", true], ["inverted", false], ["layout_mode", false], ["lane_count", true],
           ["groups_json", false], ["lane_labels_json", false], ["footer_label", false], ["font_family", false], ["label_size_logical_px", true], ["label_size_pt", true], ["strip_height_cm", true],
           ["lane_width_cm", true], ["row_gap_cm", true], ["figure_width_cm", true], ["figure_height_cm", true], ["selected_png_dpi", true],
-          ["show_mw", false], ["show_lanes", false], ["show_border", false], ["show_group_brackets", false], ["condition_rows_json", false], ["row_key", false], ["quant_role", false], ["membrane_id", false], ["non_adjacent_lanes", false], ["splice_boundaries_json", false], ["export_profile", false]
+          ["show_mw", false], ["show_lanes", false], ["show_border", false], ["show_group_brackets", false], ["hierarchy_mode", false], ["condition_rows_json", false], ["fraction_groups_json", false], ["row_key", false], ["quant_role", false], ["membrane_id", false], ["non_adjacent_lanes", false], ["splice_boundaries_json", false], ["export_profile", false]
         ];
         const decimal = (value) => Number(Number(value).toFixed(6));
         const records = await Promise.all(state.rows.map(async (row, index) => {
@@ -5376,7 +5526,9 @@
             show_lanes: state.showLanes,
             show_border: state.showBorder,
             show_group_brackets: state.showGroupBrackets,
+            hierarchy_mode: hierarchyMode(),
             condition_rows_json: JSON.stringify(state.conditionRows),
+            fraction_groups_json: JSON.stringify(state.fractionGroups),
             row_key: row.rowKey,
             quant_role: row.role,
             membrane_id: row.membraneId,
@@ -5783,25 +5935,32 @@
 
       $("#applyGroups").addEventListener("click", () => {
         try {
-          const groups = parseGroups($("#groupInput").value);
+          const inputGroups = parseGroups($("#groupInput").value);
           const laneLabelText = $("#laneLabelInput").value;
-          const laneCount = groups.reduce((sum, group) => sum + group.count, 0);
+          const laneCount = inputGroups.reduce((sum, group) => sum + group.count, 0);
           const conditionText = $("#conditionMatrixInput").value.trim();
-          const conditionRows = state.showGroupBrackets && conditionText
+          if (state.fractionMode && !laneLabelText.trim()) throw new Error("分区组图需要填写每条泳道的标签");
+          const conditionRows = conditionMatrixActive() && conditionText
             ? window.WBCore.parseConditionMatrix(conditionText, laneCount)
             : cloneConditionRows(state.conditionRows);
-          const laneLabels = state.showGroupBrackets
-            ? (state.laneLabels.length === laneCount ? [...state.laneLabels] : defaultLaneLabels(groups))
-            : parseLaneLabels(laneLabelText, groups);
-          if (!applySampleLayout(groups, laneLabels)) return;
-          if (state.showGroupBrackets) state.conditionRows = conditionText ? conditionRows : [];
-          $("#groupInput").value = groupsToText(state.groups);
+          const laneLabels = state.fractionMode
+            ? parseLaneLabels(laneLabelText, inputGroups)
+            : state.showGroupBrackets
+              ? (state.laneLabels.length === laneCount ? [...state.laneLabels] : defaultLaneLabels(inputGroups))
+              : parseLaneLabels(laneLabelText, inputGroups);
+          const sampleGroups = state.fractionMode ? groupsFromLaneLabels(laneLabels) : inputGroups;
+          if (!applySampleLayout(sampleGroups, laneLabels)) return;
+          if (state.fractionMode) {
+            state.fractionGroups = inputGroups;
+            state.conditionRows = [];
+          } else if (state.showGroupBrackets) state.conditionRows = conditionText ? conditionRows : [];
+          $("#groupInput").value = groupsToText(state.fractionMode ? state.fractionGroups : state.groups);
           $("#laneLabelInput").value = laneLabelText.trim() ? laneLabelsToText(state.laneLabels) : "";
           $("#conditionMatrixInput").value = window.WBCore.conditionMatrixToText(state.conditionRows);
           markDirty();
           renderGroupSummary();
           requestRender();
-          toast(state.showGroupBrackets ? "顶部大组与处理条件矩阵已更新" : "样本分组与泳道标签已更新");
+          toast(state.fractionMode ? "组分跨度与泳道标签已更新" : state.showGroupBrackets ? "顶部大组与处理条件矩阵已更新" : "样本分组与泳道标签已更新");
         } catch (error) { toast(error.message); }
       });
       $("#loadDemo").addEventListener("click", () => {
@@ -5839,17 +5998,24 @@
         try {
           groups = parseGroups($("#groupInput").value);
           const laneCount = groups.reduce((sum, group) => sum + group.count, 0);
-          laneLabels = state.showGroupBrackets
-            ? (state.laneLabels.length === laneCount ? [...state.laneLabels] : defaultLaneLabels(groups))
-            : parseLaneLabels(laneLabelText, groups);
-          conditionRows = state.showGroupBrackets && conditionText
+          if (state.fractionMode && !laneLabelText.trim()) throw new Error("分区组图需要填写每条泳道的标签");
+          laneLabels = state.fractionMode
+            ? parseLaneLabels(laneLabelText, groups)
+            : state.showGroupBrackets
+              ? (state.laneLabels.length === laneCount ? [...state.laneLabels] : defaultLaneLabels(groups))
+              : parseLaneLabels(laneLabelText, groups);
+          conditionRows = conditionMatrixActive() && conditionText
             ? window.WBCore.parseConditionMatrix(conditionText, laneCount)
             : cloneConditionRows(state.conditionRows);
         } catch (error) {
           return toast(error.message);
         }
-        if (!applySampleLayout(groups, laneLabels)) return;
-        if (state.showGroupBrackets) state.conditionRows = conditionText ? conditionRows : [];
+        const sampleGroups = state.fractionMode ? groupsFromLaneLabels(laneLabels) : groups;
+        if (!applySampleLayout(sampleGroups, laneLabels)) return;
+        if (state.fractionMode) {
+          state.fractionGroups = groups;
+          state.conditionRows = [];
+        } else if (state.showGroupBrackets) state.conditionRows = conditionText ? conditionRows : [];
         state.layoutMode = "compact";
         state.footerLabel = $("#footerLabel").value.trim() || "Cell line";
         state.laneWidth = 40;
@@ -5859,7 +6025,7 @@
         state.showMw = true;
         state.showLanes = false;
         state.showBorder = true;
-        $("#groupInput").value = groupsToText(state.groups);
+        $("#groupInput").value = groupsToText(state.fractionMode ? state.fractionGroups : state.groups);
         $("#laneLabelInput").value = laneLabelText.trim() ? laneLabelsToText(state.laneLabels) : "";
         $("#conditionMatrixInput").value = window.WBCore.conditionMatrixToText(state.conditionRows);
         syncLayoutControls();
@@ -5886,14 +6052,20 @@
           requestRender();
         });
       });
-      [["singleLevelMode", false], ["nestedLevelMode", true]].forEach(([inputId, nested]) => {
+      [["singleLevelMode", "single"], ["nestedLevelMode", "matrix"], ["fractionLevelMode", "fraction"]].forEach(([inputId, mode]) => {
         $("#" + inputId).addEventListener("click", () => {
-          if (state.showGroupBrackets === nested) return;
-          state.showGroupBrackets = nested;
+          if (hierarchyMode() === mode) return;
+          state.fractionMode = mode === "fraction";
+          state.showGroupBrackets = mode === "matrix";
+          if (state.fractionMode && !fractionLayoutActive()) state.fractionGroups = state.groups.map((group) => ({ ...group }));
+          $("#groupInput").value = groupsToText(state.fractionMode ? state.fractionGroups : state.groups);
+          $("#laneLabelInput").value = laneLabelsToText(state.laneLabels);
+          $("#conditionMatrixInput").value = window.WBCore.conditionMatrixToText(state.conditionRows);
           syncHierarchyControls();
+          renderGroupSummary();
           markDirty();
           requestRender();
-          toast(nested ? "已切换到双层组图界面" : "已切换到单层组图界面");
+          toast(mode === "fraction" ? "已切换到分区组图界面" : mode === "matrix" ? "已切换到双层组图界面" : "已切换到单层组图界面");
         });
       });
       $("#exportPng").addEventListener("click", exportPng);

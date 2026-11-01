@@ -255,6 +255,57 @@ async function waitForServer(url) {
     assert.ok(await page.locator("#conditionMatrixFields").isHidden());
     await page.locator("#nestedLevelMode").click();
     assert.equal(await page.locator("#conditionMatrixInput").inputValue(), twoConditions, "switching views must preserve the condition matrix");
+
+    await page.locator("#fractionLevelMode").click();
+    assert.equal(await page.locator("#fractionLevelMode").getAttribute("aria-pressed"), "true");
+    assert.ok(await page.locator("#laneLabelFields").isVisible());
+    assert.ok(await page.locator("#conditionMatrixFields").isHidden());
+    await page.locator("#groupInput").fill("Cytoplasmic fraction × 2, Nuclear fraction × 2");
+    await page.locator("#laneLabelInput").fill("NC, sh, NC");
+    const beforeInvalidFraction = await page.locator("#figureCanvas").evaluate((canvas) => canvas.toDataURL());
+    await page.locator("#applyGroups").click();
+    await page.waitForFunction(() => document.querySelector("#toast")?.textContent.includes("需要 4 个"));
+    assert.equal(await page.locator("#figureCanvas").evaluate((canvas) => canvas.toDataURL()), beforeInvalidFraction, "invalid fraction labels must not overwrite the valid figure");
+    await page.locator("#laneLabelInput").fill("NC, sh, NC, sh");
+    await page.locator("#applyGroups").click();
+    await page.waitForFunction(() => document.querySelector("#figureCanvas")?.getAttribute("aria-label")?.includes("4 个泳道"));
+    assert.match(await page.locator("#toast").textContent(), /组分跨度与泳道标签已更新/);
+    const fractionMetrics = await blankCanvasMetrics();
+    assert.ok(fractionMetrics.stripTop >= 0);
+    await page.locator("#multiFile").setInputFiles(loading);
+    await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 1);
+    if (process.env.E2E_FRACTION_SCREENSHOT) {
+      const fractionPng = await page.locator("#figureCanvas").evaluate((canvas) => canvas.toDataURL("image/png"));
+      fs.writeFileSync(process.env.E2E_FRACTION_SCREENSHOT, Buffer.from(fractionPng.split(",")[1], "base64"));
+    }
+    const fractionSvgDownload = page.waitForEvent("download");
+    await page.locator("#exportSvg").click();
+    const fractionSvg = fs.readFileSync(await (await fractionSvgDownload).path(), "utf8");
+    assert.deepEqual([...fractionSvg.matchAll(/data-role="fraction-group-label" data-label="([^"]+)"/g)].map((match) => match[1]), ["Cytoplasmic fraction", "Nuclear fraction"]);
+    assert.deepEqual([...fractionSvg.matchAll(/data-role="fraction-lane-label" data-label="([^"]+)"/g)].map((match) => match[1]), ["NC", "sh", "NC", "sh"]);
+    assert.equal((fractionSvg.match(/data-role="fraction-group-underline"/g) || []).length, 2);
+    assert.match(fractionSvg, />Cytoplasmic<\/tspan>.*>fraction<\/tspan>/);
+    assert.doesNotMatch(fractionSvg, /data-role="condition-(?:label|value)"/);
+    const fractionProjectDownload = page.waitForEvent("download");
+    await page.locator("#saveProject").click();
+    const fractionProjectPath = await (await fractionProjectDownload).path();
+    const fractionProject = JSON.parse(fs.readFileSync(fractionProjectPath, "utf8"));
+    assert.equal(fractionProject.version, 7);
+    assert.equal(fractionProject.settings.fractionMode, true);
+    assert.deepEqual(fractionProject.settings.fractionGroups, [{ name: "Cytoplasmic fraction", count: 2 }, { name: "Nuclear fraction", count: 2 }]);
+    assert.deepEqual(fractionProject.settings.laneLabels, ["NC", "sh", "NC", "sh"]);
+    assert.deepEqual(fractionProject.settings.groups, [{ name: "NC", count: 1 }, { name: "sh", count: 1 }, { name: "NC", count: 1 }, { name: "sh", count: 1 }]);
+    assert.deepEqual(fractionProject.settings.conditionRows, []);
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#newProject").click();
+    await page.locator("#projectFile").setInputFiles(fractionProjectPath);
+    await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 1);
+    assert.equal(await page.locator("#fractionLevelMode").getAttribute("aria-pressed"), "true");
+    assert.equal(await page.locator("#groupInput").inputValue(), "Cytoplasmic fraction × 2, Nuclear fraction × 2");
+    assert.equal(await page.locator("#laneLabelInput").inputValue(), "NC, sh, NC, sh");
+    await page.locator("#openQuant").click();
+    assert.deepEqual(await page.locator('#sampleMapBody [data-map="group"]').evaluateAll((items) => items.map((item) => item.value)), ["NC", "sh", "NC", "sh"], "fraction headers must not replace the experimental groups used for quantification");
+    await page.locator('[data-close-dialog="quantDialog"]').click();
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#newProject").click();
     await page.waitForFunction(() => document.querySelector("#groupInput")?.value.includes("Control × 1"));
@@ -520,8 +571,9 @@ async function waitForServer(url) {
     assert.match(projectFile.suggestedFilename(), /project\.wb-project$/);
     const projectPath = await projectFile.path();
     const project = JSON.parse(fs.readFileSync(projectPath, "utf8"));
-    assert.equal(project.version, 6);
+    assert.equal(project.version, 7);
     assert.equal(project.settings.showGroupBrackets, true);
+    assert.equal(project.settings.fractionMode, false);
     assert.deepEqual(project.settings.conditionRows, savedConditionRows);
     assert.equal(project.rows.length, 2);
     assert.equal(project.rows[1].backgroundClean, 60);
@@ -553,8 +605,11 @@ async function waitForServer(url) {
 
     const noMatrixV6Path = path.join(fixtureDir, "no-matrix-v6.wb-project");
     const noMatrixV6 = JSON.parse(JSON.stringify(project));
+    noMatrixV6.version = 6;
     noMatrixV6.settings.showGroupBrackets = false;
     noMatrixV6.settings.conditionRows = [];
+    delete noMatrixV6.settings.fractionMode;
+    delete noMatrixV6.settings.fractionGroups;
     fs.writeFileSync(noMatrixV6Path, JSON.stringify(noMatrixV6));
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#newProject").click();
@@ -563,11 +618,26 @@ async function waitForServer(url) {
     assert.equal(await page.locator("#singleLevelMode").getAttribute("aria-pressed"), "true", "v6 projects without a matrix must remain valid");
     assert.equal(await page.locator("#conditionMatrixInput").inputValue(), "");
 
+    const legacyMatrixV6Path = path.join(fixtureDir, "matrix-v6.wb-project");
+    const legacyMatrixV6 = JSON.parse(JSON.stringify(project));
+    legacyMatrixV6.version = 6;
+    delete legacyMatrixV6.settings.fractionMode;
+    delete legacyMatrixV6.settings.fractionGroups;
+    fs.writeFileSync(legacyMatrixV6Path, JSON.stringify(legacyMatrixV6));
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#newProject").click();
+    await page.locator("#projectFile").setInputFiles(legacyMatrixV6Path);
+    await page.waitForFunction(() => document.querySelectorAll("#rowList .protein-row").length === 2);
+    assert.equal(await page.locator("#nestedLevelMode").getAttribute("aria-pressed"), "true", "v6 matrix projects must retain their original layout");
+    assert.equal(await page.locator("#conditionMatrixInput").inputValue(), "Treatment A: −, +, −\nCondition B: +, −, +");
+
     const legacyV5Path = path.join(fixtureDir, "legacy-v5.wb-project");
     const legacyV5 = JSON.parse(JSON.stringify(project));
     legacyV5.version = 5;
     legacyV5.settings.showGroupBrackets = true;
     delete legacyV5.settings.conditionRows;
+    delete legacyV5.settings.fractionMode;
+    delete legacyV5.settings.fractionGroups;
     fs.writeFileSync(legacyV5Path, JSON.stringify(legacyV5));
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#newProject").click();
@@ -733,7 +803,7 @@ async function waitForServer(url) {
     const cleavageProjectDownload = page.waitForEvent("download");
     await page.locator("#saveProject").click();
     const cleavageProject = JSON.parse(fs.readFileSync(await (await cleavageProjectDownload).path(), "utf8"));
-    assert.equal(cleavageProject.version, 6);
+    assert.equal(cleavageProject.version, 7);
     assert.equal(cleavageProject.settings.quant.normalizationMode, "paired-band");
     assert.equal(cleavageProject.settings.quant.rois[cleavageNumeratorKey].polarity, "bright");
     assert.equal(cleavageProject.settings.quant.rois[cleavageDenominatorKey].polarity, "bright");
