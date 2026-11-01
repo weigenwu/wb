@@ -568,7 +568,7 @@ function testQc() {
 
 function testPwaShell() {
   const root = path.join(__dirname, "..");
-  assert.equal(core.ENGINE_VERSION, "2.10.0");
+  assert.equal(core.ENGINE_VERSION, "2.10.1");
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.webmanifest"), "utf8"));
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   assert.equal(manifest.name, "实验室工作台 · WB 组图与灰度");
@@ -579,7 +579,7 @@ function testPwaShell() {
   assert.match(html, /navigator\.serviceWorker\.register\("\.\/sw\.js"\)/);
   const worker = fs.readFileSync(path.join(root, "sw.js"), "utf8");
   assert.ok(worker.includes("./wb-core.js"));
-  assert.ok(worker.includes("figurelab-wb-v2.10.0"));
+  assert.ok(worker.includes("figurelab-wb-v2.10.1"));
   ["fractionLevelMode", "conditionMatrixFields", "conditionMatrixInput", "conditionMatrixHelp", "sampleMapText", "quantRoiHeight", "suggestRois", "exposureCheck", "downloadExposureReport", "quantPlotTarget", "exportQuantPlotPng", "editBackgroundClean", "editRotation", "autoStraighten", "quantNormalizationMode", "quantNumerator", "quantDenominator", "createCleavagePair", "guideRois", "quantQuickResults", "openGrayReader", "grayReaderFile", "grayReaderFolder", "chooseGrayReaderFolder", "previousGrayReaderFile", "nextGrayReaderFile", "grayReaderProgress", "grayReaderLaneCount", "grayReaderRoiHeight", "grayReaderCanvas", "grayReaderResults", "copyGrayReaderValues", "downloadGrayReaderCsv", "downloadGrayReaderAuditCsv"].forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
   assert.match(html, /const PROJECT_VERSION = 7;/);
   assert.match(html, /SUPPORTED_PROJECT_VERSIONS = \[1, 2, 3, 4, 5, 6, PROJECT_VERSION\]/);

@@ -278,14 +278,66 @@ async function waitForServer(url) {
       const fractionPng = await page.locator("#figureCanvas").evaluate((canvas) => canvas.toDataURL("image/png"));
       fs.writeFileSync(process.env.E2E_FRACTION_SCREENSHOT, Buffer.from(fractionPng.split(",")[1], "base64"));
     }
-    const fractionSvgDownload = page.waitForEvent("download");
-    await page.locator("#exportSvg").click();
-    const fractionSvg = fs.readFileSync(await (await fractionSvgDownload).path(), "utf8");
+    const downloadFractionSvg = async () => {
+      const download = page.waitForEvent("download");
+      await page.locator("#exportSvg").click();
+      return fs.readFileSync(await (await download).path(), "utf8");
+    };
+    const fractionTypography = (svg) => page.evaluate((source) => {
+      const holder = document.createElement("div");
+      holder.style.cssText = "position:absolute;left:0;top:0;opacity:0;pointer-events:none";
+      holder.innerHTML = source;
+      document.body.append(holder);
+      const root = holder.querySelector("svg");
+      const viewBox = root.viewBox.baseVal;
+      const read = (role) => [...root.querySelectorAll(`[data-role="${role}"]`)].map((item) => {
+        const spans = [...item.querySelectorAll("tspan")];
+        const ys = spans.length ? spans.map((span) => Number(span.getAttribute("y"))) : [Number(item.getAttribute("y"))];
+        const box = item.getBBox();
+        return {
+          label: item.getAttribute("data-label"),
+          lines: spans.length ? spans.map((span) => span.textContent) : [item.textContent],
+          size: Number(item.getAttribute("font-size")),
+          centerY: ys.reduce((sum, y) => sum + y, 0) / ys.length,
+          ys,
+          box: { x: box.x, y: box.y, width: box.width, height: box.height },
+          withinCanvas: box.x >= 0 && box.y >= 0 && box.x + box.width <= viewBox.width && box.y + box.height <= viewBox.height,
+        };
+      });
+      const underlineYs = [...root.querySelectorAll('[data-role="fraction-group-underline"]')].map((line) => Number(line.getAttribute("y1")));
+      const result = { headers: read("fraction-group-label"), lanes: read("fraction-lane-label"), underlineYs, stripTop: Math.min(...[...root.querySelectorAll("image")].map((image) => Number(image.getAttribute("y")))) };
+      holder.remove();
+      return result;
+    }, svg);
+    const assertUniformFractionType = ({ headers, lanes, underlineYs, stripTop }) => {
+      assert.equal(new Set(headers.map((item) => item.size)).size, 1, "all fraction headers must use one shared font size");
+      assert.equal(new Set(lanes.map((item) => item.size)).size, 1, "all lane labels must use one shared font size");
+      assert.equal(new Set(headers.map((item) => item.centerY)).size, 1, "fraction headers must share a vertical center even when line counts differ");
+      assert.equal(new Set(lanes.map((item) => item.centerY)).size, 1, "lane labels must share one baseline");
+      [...headers, ...lanes].forEach((item) => {
+        assert.ok(item.withinCanvas, `${item.label} must remain inside the exported SVG`);
+        assert.doesNotMatch(item.lines.join(""), /…|\.\.\./, "fraction and lane labels must not use ellipsis");
+        assert.equal(item.lines.join("").replace(/\s+/g, ""), item.label.replace(/\s+/g, ""), "line wrapping must preserve every non-whitespace character");
+      });
+      headers.forEach((item, index) => assert.ok(item.box.y + item.box.height < underlineYs[index] - 2, `${item.label} must not touch its underline`));
+      lanes.forEach((item) => {
+        assert.ok(item.box.y > Math.max(...underlineYs) + 2, `${item.label} must stay below the fraction underlines`);
+        assert.ok(item.box.y + item.box.height < stripTop, `${item.label} must stay above the blot strip`);
+      });
+      [headers, lanes].forEach((row) => row.slice(1).forEach((item, index) => {
+        assert.ok(row[index].box.x + row[index].box.width < item.box.x, "neighboring labels must not overlap horizontally");
+      }));
+    };
+    const fractionSvg = await downloadFractionSvg();
     assert.deepEqual([...fractionSvg.matchAll(/data-role="fraction-group-label" data-label="([^"]+)"/g)].map((match) => match[1]), ["Cytoplasmic fraction", "Nuclear fraction"]);
     assert.deepEqual([...fractionSvg.matchAll(/data-role="fraction-lane-label" data-label="([^"]+)"/g)].map((match) => match[1]), ["NC", "sh", "NC", "sh"]);
     assert.equal((fractionSvg.match(/data-role="fraction-group-underline"/g) || []).length, 2);
     assert.match(fractionSvg, />Cytoplasmic<\/tspan>.*>fraction<\/tspan>/);
     assert.doesNotMatch(fractionSvg, /data-role="condition-(?:label|value)"/);
+    const wrappedFractionType = await fractionTypography(fractionSvg);
+    assertUniformFractionType(wrappedFractionType);
+    assert.deepEqual(wrappedFractionType.headers.map((item) => item.lines), [["Cytoplasmic", "fraction"], ["Nuclear", "fraction"]]);
+    assert.deepEqual(wrappedFractionType.headers[0].ys, wrappedFractionType.headers[1].ys, "wrapped fraction headings must align line by line");
     const fractionProjectDownload = page.waitForEvent("download");
     await page.locator("#saveProject").click();
     const fractionProjectPath = await (await fractionProjectDownload).path();
@@ -306,6 +358,35 @@ async function waitForServer(url) {
     await page.locator("#openQuant").click();
     assert.deepEqual(await page.locator('#sampleMapBody [data-map="group"]').evaluateAll((items) => items.map((item) => item.value)), ["NC", "sh", "NC", "sh"], "fraction headers must not replace the experimental groups used for quantification");
     await page.locator('[data-close-dialog="quantDialog"]').click();
+    await page.locator("#groupInput").fill("Cytoplasmic × 2, Nuclear × 2");
+    await page.locator("#laneLabelInput").fill("sh-NC, sh-NC, sh2, sh2");
+    await page.locator("#applyGroups").click();
+    const unequalLengthType = await fractionTypography(await downloadFractionSvg());
+    assertUniformFractionType(unequalLengthType);
+    assert.deepEqual(unequalLengthType.headers.map((item) => item.lines), [["Cytoplasmic"], ["Nuclear"]]);
+    assert.deepEqual(unequalLengthType.lanes.map((item) => item.label), ["sh-NC", "sh-NC", "sh2", "sh2"]);
+    if (process.env.E2E_FRACTION_TYPOGRAPHY_SCREENSHOT) {
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const png = await page.locator("#figureCanvas").evaluate((canvas) => canvas.toDataURL("image/png"));
+      fs.writeFileSync(process.env.E2E_FRACTION_TYPOGRAPHY_SCREENSHOT, Buffer.from(png.split(",")[1], "base64"));
+    }
+    await page.locator("#groupInput").fill("Cytoplasmic fraction × 2, Nuclear × 2");
+    await page.locator("#applyGroups").click();
+    const mixedLineType = await fractionTypography(await downloadFractionSvg());
+    assertUniformFractionType(mixedLineType);
+    assert.equal(mixedLineType.headers[0].lines.length, 2, "long headers should wrap rather than shrink independently");
+    assert.deepEqual(mixedLineType.headers[1].lines, ["Nuclear"]);
+    const longLetters = "W".repeat(40);
+    const longWords = "Very long treatment condition group";
+    const longChinese = "这是一个用于测试自动换行且完整显示的较长中文组分标签";
+    await page.locator("#groupInput").fill(`${longLetters} × 1, ${longWords} × 1, ${longChinese} × 2`);
+    await page.locator("#laneLabelInput").fill(`${longLetters}, ${longWords}, ${longChinese}, sh`);
+    await page.locator("#applyGroups").click();
+    const extremeType = await fractionTypography(await downloadFractionSvg());
+    assertUniformFractionType(extremeType);
+    assert.deepEqual(extremeType.headers.map((item) => item.label), [longLetters, longWords, longChinese]);
+    assert.deepEqual(extremeType.lanes.map((item) => item.label), [longLetters, longWords, longChinese, "sh"]);
+    assert.ok(extremeType.headers[0].lines.length > 2 && extremeType.lanes[0].lines.length > 2, "unbroken long labels must wrap at character boundaries instead of clipping");
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#newProject").click();
     await page.waitForFunction(() => document.querySelector("#groupInput")?.value.includes("Control × 1"));

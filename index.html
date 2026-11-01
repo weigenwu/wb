@@ -1157,24 +1157,39 @@
         return { text: output, size: fontSize };
       }
 
-      function wrappedHeaderLabel(text, maxWidth, size) {
-        const value = String(text || "").trim();
-        if (measuredWidth(value, size) <= maxWidth) return { lines: [value], size };
-        const words = value.split(/\s+/).filter(Boolean);
-        if (words.length < 2) {
-          const fitted = fittedLabel(value, maxWidth, size);
-          return { lines: [fitted.text], size: fitted.size };
-        }
-        let split = 1;
-        let bestWidth = Infinity;
-        for (let index = 1; index < words.length; index += 1) {
-          const width = Math.max(measuredWidth(words.slice(0, index).join(" "), size), measuredWidth(words.slice(index).join(" "), size));
-          if (width < bestWidth) { bestWidth = width; split = index; }
-        }
-        const lines = [words.slice(0, split).join(" "), words.slice(split).join(" ")];
+      function uniformLabelRow(items, size, wrapWords = false) {
+        const labels = items.map(({ text, maxWidth }) => {
+          const value = String(text || "").trim();
+          const words = value.split(/\s+/).filter(Boolean);
+          let lines = [value];
+          if (wrapWords && words.length > 1 && measuredWidth(value, size) > maxWidth) {
+            let split = 1;
+            let bestWidth = Infinity;
+            for (let index = 1; index < words.length; index += 1) {
+              const width = Math.max(measuredWidth(words.slice(0, index).join(" "), size), measuredWidth(words.slice(index).join(" "), size));
+              if (width < bestWidth) { bestWidth = width; split = index; }
+            }
+            lines = [words.slice(0, split).join(" "), words.slice(split).join(" ")];
+          }
+          return { lines, maxWidth };
+        });
         let fontSize = size;
-        while (fontSize > 10 && lines.some((line) => measuredWidth(line, fontSize) > maxWidth)) fontSize -= 1;
-        return { lines: lines.map((line) => fittedLabel(line, maxWidth, fontSize).text), size: fontSize };
+        while (fontSize > 10 && labels.some((label) => label.lines.some((line) => measuredWidth(line, fontSize) > label.maxWidth))) fontSize -= 1;
+        // Keep the full label at the shared minimum size; wrap rather than truncate it.
+        const lines = labels.map((label) => label.lines.flatMap((line) => {
+          const chunks = [];
+          let chunk = "";
+          for (const character of line) {
+            if (chunk && measuredWidth(chunk + character, fontSize) > label.maxWidth) {
+              chunks.push(chunk.trim());
+              chunk = "";
+            }
+            chunk += character;
+          }
+          chunks.push(chunk.trim());
+          return chunks;
+        }));
+        return { lines, size: fontSize, lineStep: Math.ceil(fontSize * 1.2), lineCount: Math.max(1, ...lines.map((label) => label.length)) };
       }
 
       function fullLabelAngle(text, slotWidth, size, weight = 700) {
@@ -1889,6 +1904,8 @@
         const right = state.showMw ? Math.min(compact ? 190 : 220, Math.max(compact ? 83 : 116, Math.ceil(longestMw + (compact ? 30 : 34)))) : 24;
         const longestLaneLabel = Math.max(0, ...resolvedLaneLabels().map((label) => measuredWidth(label, state.labelSize)));
         const bandWidth = totalSamples() * state.rowHeight;
+        const fractionHeaders = fractionActive ? uniformLabelRow(state.fractionGroups.map((group) => ({ text: group.name, maxWidth: Math.max(1, group.count * state.rowHeight - 6) })), state.labelSize, true) : null;
+        const fractionLabels = fractionActive ? uniformLabelRow(resolvedLaneLabels().map((text) => ({ text, maxWidth: Math.max(1, state.rowHeight - 4) })), state.labelSize) : null;
         const width = left + bandWidth + right;
         const labelAngle = compact ? Math.max(
           Math.PI / 4,
@@ -1900,15 +1917,16 @@
         const topGroups = matrixActive || fractionActive || (compact && state.showGroupBrackets && state.groups.length > 1 && totalSamples() > 1);
         const baseTop = compact ? Math.max(72, Math.ceil(longestLaneLabel * Math.sin(labelAngle) + state.labelSize + 18)) : Math.max(82, Math.ceil(groupTop + state.labelSize + 42));
         const topGroupLabelY = Math.max(12, Math.ceil(state.labelSize * .75));
-        const topGroupLineY = topGroupLabelY + (fractionActive ? Math.max(30, Math.ceil(state.labelSize * 1.9)) : Math.max(14, Math.ceil(state.labelSize * .9)));
+        const fractionHeaderCenterY = fractionActive ? 12 + fractionHeaders.lineCount * fractionHeaders.lineStep / 2 : 0;
+        const topGroupLineY = fractionActive ? 17 + fractionHeaders.lineCount * fractionHeaders.lineStep : topGroupLabelY + Math.max(14, Math.ceil(state.labelSize * .9));
         const matrixRowStep = Math.max(22, Math.ceil(state.labelSize * 1.45));
         const matrixFirstRowY = topGroupLineY + Math.max(20, Math.ceil(state.labelSize * 1.3));
-        const fractionLaneLabelY = topGroupLineY + Math.max(20, Math.ceil(state.labelSize * 1.3));
+        const fractionLaneLabelY = fractionActive ? topGroupLineY + 10 + fractionLabels.lineCount * fractionLabels.lineStep / 2 : 0;
         const matrixLastRowY = state.conditionRows.length
           ? matrixFirstRowY + (state.conditionRows.length - 1) * matrixRowStep
           : topGroupLineY;
         const top = fractionActive
-          ? fractionLaneLabelY + Math.max(22, Math.ceil(state.labelSize * 1.35))
+          ? fractionLaneLabelY + fractionLabels.lineCount * fractionLabels.lineStep / 2 + 12
           : matrixActive
           ? matrixLastRowY + (state.conditionRows.length ? Math.max(22, Math.ceil(state.labelSize * 1.35)) : 18)
           : baseTop + (topGroups ? topGroupLineY + 8 : 0);
@@ -1918,7 +1936,7 @@
         const footerLabelY = footerLineY + 23;
         const bottom = compact && state.footerLabel.trim() ? 86 : (state.showLanes ? 55 : 28);
         const height = contentBottom + bottom;
-        return { width, height, left, right, top, bottom, bandWidth, contentBottom, topGroups, topGroupLineY, topGroupLabelY, matrixActive, matrixFirstRowY, matrixRowStep, fractionActive, fractionLaneLabelY, footerLineY, footerLabelY, labelAngle, groupAngles };
+        return { width, height, left, right, top, bottom, bandWidth, contentBottom, topGroups, topGroupLineY, topGroupLabelY, matrixActive, matrixFirstRowY, matrixRowStep, fractionActive, fractionHeaders, fractionLabels, fractionHeaderCenterY, fractionLaneLabelY, footerLineY, footerLabelY, labelAngle, groupAngles };
       }
 
       function drawContainedImage(ctx, row, x, y, width, height) {
@@ -1993,7 +2011,7 @@
           ctx.strokeStyle = "#111827";
           ctx.fillStyle = "#111827";
           ctx.textAlign = "center";
-          state.fractionGroups.forEach((group) => {
+          state.fractionGroups.forEach((group, groupIndex) => {
             const start = g.left + laneOffset * laneWidth;
             const end = start + group.count * laneWidth;
             const span = end - start;
@@ -2004,19 +2022,18 @@
             ctx.moveTo(start + inset, g.topGroupLineY);
             ctx.lineTo(end - inset, g.topGroupLineY);
             ctx.stroke();
-            const label = wrappedHeaderLabel(group.name, Math.max(1, span - 6), state.labelSize);
-            const lineStep = Math.max(13, Math.ceil(label.size * 1.05));
-            const firstY = g.topGroupLineY - 8 - (label.lines.length - 1) * lineStep;
-            ctx.font = `700 ${label.size}px Arial, "Microsoft YaHei", sans-serif`;
-            label.lines.forEach((line, index) => ctx.fillText(line, (start + end) / 2, firstY + index * lineStep));
+            const lines = g.fractionHeaders.lines[groupIndex];
+            const firstY = g.fractionHeaderCenterY - (lines.length - 1) * g.fractionHeaders.lineStep / 2;
+            ctx.font = `700 ${g.fractionHeaders.size}px Arial, "Microsoft YaHei", sans-serif`;
+            lines.forEach((line, index) => ctx.fillText(line, (start + end) / 2, firstY + index * g.fractionHeaders.lineStep));
             laneOffset += group.count;
           });
           ctx.lineCap = "butt";
-          resolvedLaneLabels().forEach((value, lane) => {
-            const label = fittedLabel(value, Math.max(1, laneWidth - 4), state.labelSize, 700);
-            ctx.font = `700 ${label.size}px Arial, "Microsoft YaHei", sans-serif`;
+          g.fractionLabels.lines.forEach((lines, lane) => {
+            const firstY = g.fractionLaneLabelY - (lines.length - 1) * g.fractionLabels.lineStep / 2;
+            ctx.font = `700 ${g.fractionLabels.size}px Arial, "Microsoft YaHei", sans-serif`;
             ctx.textAlign = "center";
-            ctx.fillText(label.text, g.left + (lane + .5) * laneWidth, g.fractionLaneLabelY);
+            lines.forEach((line, index) => ctx.fillText(line, g.left + (lane + .5) * laneWidth, firstY + index * g.fractionLabels.lineStep));
           });
         } else if (g.matrixActive) {
           let laneOffset = 0;
@@ -2391,21 +2408,21 @@
         const compact = state.layoutMode === "compact";
         if (g.fractionActive) {
           let laneOffset = 0;
-          state.fractionGroups.forEach((group) => {
+          state.fractionGroups.forEach((group, groupIndex) => {
             const start = g.left + laneOffset * laneWidth;
             const end = start + group.count * laneWidth;
             const span = end - start;
             const inset = Math.min(7, span * .1);
-            const label = wrappedHeaderLabel(group.name, Math.max(1, span - 6), state.labelSize);
-            const lineStep = Math.max(13, Math.ceil(label.size * 1.05));
-            const firstY = g.topGroupLineY - 8 - (label.lines.length - 1) * lineStep;
+            const lines = g.fractionHeaders.lines[groupIndex];
+            const firstY = g.fractionHeaderCenterY - (lines.length - 1) * g.fractionHeaders.lineStep / 2;
             parts.push(`<line data-role="fraction-group-underline" x1="${start + inset}" y1="${g.topGroupLineY}" x2="${end - inset}" y2="${g.topGroupLineY}" stroke="#111827" stroke-width="4" stroke-linecap="round"/>`);
-            parts.push(`<text data-role="fraction-group-label" data-label="${xml(group.name)}" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${label.size}" font-weight="700" fill="#111827">${label.lines.map((line, index) => `<tspan x="${(start + end) / 2}" y="${firstY + index * lineStep}" dominant-baseline="middle">${xml(line)}</tspan>`).join("")}</text>`);
+            parts.push(`<text data-role="fraction-group-label" data-label="${xml(group.name)}" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${g.fractionHeaders.size}" font-weight="700" fill="#111827">${lines.map((line, index) => `<tspan x="${(start + end) / 2}" y="${firstY + index * g.fractionHeaders.lineStep}" dominant-baseline="middle">${xml(line)}</tspan>`).join("")}</text>`);
             laneOffset += group.count;
           });
           resolvedLaneLabels().forEach((value, lane) => {
-            const label = fittedLabel(value, Math.max(1, laneWidth - 4), state.labelSize, 700);
-            parts.push(`<text data-role="fraction-lane-label" data-label="${xml(value)}" x="${g.left + (lane + .5) * laneWidth}" y="${g.fractionLaneLabelY}" dominant-baseline="middle" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${label.size}" font-weight="700" fill="#111827">${xml(label.text)}</text>`);
+            const lines = g.fractionLabels.lines[lane];
+            const firstY = g.fractionLaneLabelY - (lines.length - 1) * g.fractionLabels.lineStep / 2;
+            parts.push(`<text data-role="fraction-lane-label" data-label="${xml(value)}" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="${g.fractionLabels.size}" font-weight="700" fill="#111827">${lines.map((line, index) => `<tspan x="${g.left + (lane + .5) * laneWidth}" y="${firstY + index * g.fractionLabels.lineStep}" dominant-baseline="middle">${xml(line)}</tspan>`).join("")}</text>`);
           });
         } else if (g.matrixActive) {
           let laneOffset = 0;
